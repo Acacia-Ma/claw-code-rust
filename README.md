@@ -12,6 +12,10 @@
 
 [English](./README.md) | [简体中文](./docs/i18n/README.zh-CN.md) | [日本語](./docs/i18n/README.ja.md) | [한국어](./docs/i18n/README.ko.md) | [Español](./docs/i18n/README.es.md) | [Français](./docs/i18n/README.fr.md)
 
+🚧Early-stage project under active development — not production-ready yet.
+
+⭐ Star us to follow along — a usable version is coming within a month!
+
 <img src="./docs/assets/overview.svg" alt="Project Overview" width="100%" />
 
 </div>
