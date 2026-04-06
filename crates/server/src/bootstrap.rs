@@ -7,8 +7,8 @@ use clawcr_tools::ToolRegistry;
 use clawcr_utils::FileSystemConfigPathResolver;
 
 use crate::{
-    execution::ServerRuntimeDependencies,
-    load_server_provider, resolve_listen_targets, run_listeners, ListenTarget, ServerRuntime,
+    execution::ServerRuntimeDependencies, load_server_provider, resolve_listen_targets,
+    run_listeners, ListenTarget, ServerRuntime,
 };
 
 /// Command-line arguments accepted by the standalone server process entrypoint.
@@ -56,7 +56,10 @@ pub async fn run_server_process(args: ServerProcessArgs) -> Result<()> {
 
     let mut registry = ToolRegistry::new();
     clawcr_tools::register_builtin_tools(&mut registry);
-    let provider = load_server_provider(&resolver.user_config_file(), config.default_model.as_deref())?;
+    let provider = load_server_provider(
+        &resolver.user_config_file(),
+        config.default_model.as_deref(),
+    )?;
     let runtime = ServerRuntime::new(
         resolver.user_config_dir(),
         ServerRuntimeDependencies::new(

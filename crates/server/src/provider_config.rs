@@ -3,7 +3,9 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use clawcr_provider::{anthropic::AnthropicProvider, openai_compat::OpenAICompatProvider, ModelProvider};
+use clawcr_provider::{
+    anthropic::AnthropicProvider, openai_compat::OpenAICompatProvider, ModelProvider,
+};
 
 /// Resolved provider bootstrap owned by the server runtime.
 pub struct ResolvedServerProvider {
@@ -23,7 +25,10 @@ struct LegacyProviderConfig {
 }
 
 /// Loads the server-side provider from config and environment variables.
-pub fn load_server_provider(config_file: &Path, default_model: Option<&str>) -> Result<ResolvedServerProvider> {
+pub fn load_server_provider(
+    config_file: &Path,
+    default_model: Option<&str>,
+) -> Result<ResolvedServerProvider> {
     let file_config = read_legacy_provider_config(config_file).unwrap_or_default();
     let env_provider = env_non_empty("CLAWCR_PROVIDER");
     let env_model = env_non_empty("CLAWCR_MODEL");
@@ -74,9 +79,8 @@ pub fn load_server_provider(config_file: &Path, default_model: Option<&str>) -> 
             })
         }
         "ollama" => {
-            let base_url = ensure_openai_v1(
-                &base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
-            );
+            let base_url =
+                ensure_openai_v1(&base_url.unwrap_or_else(|| "http://localhost:11434".to_string()));
             let mut provider = OpenAICompatProvider::new(base_url);
             if let Some(api_key) = api_key {
                 provider = provider.with_api_key(api_key);
@@ -87,9 +91,8 @@ pub fn load_server_provider(config_file: &Path, default_model: Option<&str>) -> 
             })
         }
         "openai" => {
-            let base_url = ensure_openai_v1(
-                &base_url.unwrap_or_else(|| "https://api.openai.com".to_string()),
-            );
+            let base_url =
+                ensure_openai_v1(&base_url.unwrap_or_else(|| "https://api.openai.com".to_string()));
             let mut provider = OpenAICompatProvider::new(base_url);
             if let Some(api_key) = api_key {
                 provider = provider.with_api_key(api_key);
@@ -109,12 +112,13 @@ fn read_legacy_provider_config(config_file: &Path) -> Result<LegacyProviderConfi
     }
     let contents = fs::read_to_string(config_file)
         .with_context(|| format!("failed to read {}", config_file.display()))?;
-    toml::from_str(&contents)
-        .with_context(|| format!("failed to parse {}", config_file.display()))
+    toml::from_str(&contents).with_context(|| format!("failed to parse {}", config_file.display()))
 }
 
 fn env_non_empty(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.trim().is_empty())
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn ensure_openai_v1(url: &str) -> String {

@@ -6,7 +6,10 @@ use clawcr_core::{SessionConfig, SessionId, SessionState};
 use clawcr_provider::ModelProvider;
 use clawcr_tools::ToolRegistry;
 
-use crate::{session::SessionSummary, turn::{SteerInputRecord, TurnSummary}};
+use crate::{
+    session::SessionSummary,
+    turn::{SteerInputRecord, TurnSummary},
+};
 
 /// Shared server-owned runtime dependencies used by live turn execution.
 pub struct ServerRuntimeDependencies {

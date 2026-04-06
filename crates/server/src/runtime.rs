@@ -25,8 +25,8 @@ use crate::{
     SessionEventPayload, SessionForkParams, SessionForkResult, SessionResumeParams,
     SessionResumeResult, SessionRuntimeStatus, SessionStartParams, SessionStartResult,
     SessionStatusChangedPayload, SteerInputRecord, SuccessResponse, TurnEventPayload,
-    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult,
-    TurnSteerParams, TurnSteerResult, TurnSummary,
+    TurnInterruptParams, TurnInterruptResult, TurnStartParams, TurnStartResult, TurnSteerParams,
+    TurnSteerResult, TurnSummary,
 };
 
 pub struct ServerRuntime {
@@ -120,9 +120,7 @@ impl ServerRuntime {
 
         match method.as_str() {
             "session/start" => Some(self.handle_session_start(connection_id, id?, params).await),
-            "session/resume" => {
-                Some(self.handle_session_resume(connection_id, id?, params).await)
-            }
+            "session/resume" => Some(self.handle_session_resume(connection_id, id?, params).await),
             "session/fork" => Some(self.handle_session_fork(connection_id, id?, params).await),
             "turn/start" => Some(self.handle_turn_start(id?, params).await),
             "turn/interrupt" => Some(self.handle_turn_interrupt(id?, params).await),
@@ -132,9 +130,10 @@ impl ServerRuntime {
                 ProtocolErrorCode::ApprovalNotFound,
                 "no pending approval request exists for this runtime",
             )),
-            "events/subscribe" => {
-                Some(self.handle_events_subscribe(connection_id, id?, params).await)
-            }
+            "events/subscribe" => Some(
+                self.handle_events_subscribe(connection_id, id?, params)
+                    .await,
+            ),
             _ => Some(self.error_response(
                 id?,
                 ProtocolErrorCode::InvalidParams,
@@ -333,9 +332,9 @@ impl ServerRuntime {
             resolved_model: Some(fork_model.clone()),
             status: SessionRuntimeStatus::Idle,
         };
-        let mut core_session =
-            self.deps
-                .new_session_state(forked_id, fork_cwd, Some(fork_model));
+        let mut core_session = self
+            .deps
+            .new_session_state(forked_id, fork_cwd, Some(fork_model));
         core_session.messages = source_core_session.messages.clone();
         core_session.turn_count = source_core_session.turn_count;
         core_session.total_input_tokens = source_core_session.total_input_tokens;
@@ -435,7 +434,10 @@ impl ServerRuntime {
             let turn = TurnSummary {
                 turn_id: TurnId::new(),
                 session_id: params.session_id,
-                sequence: session.latest_turn.as_ref().map_or(1, |turn| turn.sequence + 1),
+                sequence: session
+                    .latest_turn
+                    .as_ref()
+                    .map_or(1, |turn| turn.sequence + 1),
                 status: TurnStatus::Running,
                 model_slug: session
                     .summary
@@ -668,9 +670,20 @@ impl ServerRuntime {
         .expect("serialize events/subscribe response")
     }
 
-    async fn execute_turn(self: Arc<Self>, session_id: SessionId, turn: TurnSummary, input: String) {
-        self.emit_text_item(session_id, turn.turn_id, ItemKind::UserMessage, "You", input.clone())
-            .await;
+    async fn execute_turn(
+        self: Arc<Self>,
+        session_id: SessionId,
+        turn: TurnSummary,
+        input: String,
+    ) {
+        self.emit_text_item(
+            session_id,
+            turn.turn_id,
+            ItemKind::UserMessage,
+            "You",
+            input.clone(),
+        )
+        .await;
 
         let Some(session_arc) = self.sessions.lock().await.get(&session_id).cloned() else {
             return;
@@ -864,8 +877,14 @@ impl ServerRuntime {
         payload: serde_json::Value,
     ) {
         let item_id = ItemId::new();
-        self.emit_item_started(session_id, turn_id, item_id, item_kind.clone(), payload.clone())
-            .await;
+        self.emit_item_started(
+            session_id,
+            turn_id,
+            item_id,
+            item_kind.clone(),
+            payload.clone(),
+        )
+        .await;
         self.emit_item_completed(session_id, turn_id, item_id, item_kind, payload)
             .await;
     }
@@ -936,8 +955,7 @@ impl ServerRuntime {
         if let Some(connection) = self.connections.lock().await.get_mut(&connection_id) {
             let desired = event_types.unwrap_or_default();
             let already = connection.subscriptions.iter().any(|subscription| {
-                subscription.session_id == Some(session_id)
-                    && subscription.event_types == desired
+                subscription.session_id == Some(session_id) && subscription.event_types == desired
             });
             if already {
                 return;

@@ -78,7 +78,9 @@ impl StdioServerClient {
             .with_context(|| format!("failed to spawn {}", config.program.display()))?;
         let stdin = child.stdin.take().context("capture server stdin")?;
         let stdout = child.stdout.take().context("capture server stdout")?;
-        let pending = Arc::new(Mutex::new(HashMap::<u64, oneshot::Sender<serde_json::Value>>::new()));
+        let pending = Arc::new(Mutex::new(
+            HashMap::<u64, oneshot::Sender<serde_json::Value>>::new(),
+        ));
         let (notifications_tx, notifications_rx) = mpsc::unbounded_channel();
 
         tokio::spawn(run_stdout_reader(
@@ -116,7 +118,10 @@ impl StdioServerClient {
     }
 
     /// Starts a new server session and returns the typed result payload.
-    pub async fn session_start(&mut self, params: SessionStartParams) -> Result<SessionStartResult> {
+    pub async fn session_start(
+        &mut self,
+        params: SessionStartParams,
+    ) -> Result<SessionStartResult> {
         self.request("session/start", params).await
     }
 
@@ -162,7 +167,10 @@ impl StdioServerClient {
             return Ok(None);
         };
         let event = serde_json::from_value(notification.params.clone()).with_context(|| {
-            format!("failed to decode server event for method {}", notification.method)
+            format!(
+                "failed to decode server event for method {}",
+                notification.method
+            )
         })?;
         Ok(Some((notification.method, event)))
     }
@@ -194,8 +202,8 @@ impl StdioServerClient {
             .await
             .with_context(|| format!("server dropped response for request {request_id}"))?;
         if response.get("error").is_some() {
-            let error: ErrorResponse = serde_json::from_value(response)
-                .context("decode error response from server")?;
+            let error: ErrorResponse =
+                serde_json::from_value(response).context("decode error response from server")?;
             let data = if error.error.data.is_null() {
                 String::new()
             } else {

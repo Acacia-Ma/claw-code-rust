@@ -2,11 +2,11 @@ use std::io::{self, Write};
 
 use anyhow::Result;
 use clap::Args;
+use clawcr_safety::legacy_permissions::PermissionMode;
 use clawcr_server::{
     InputItem, ItemEnvelope, ItemKind, ServerEvent, SessionStartParams, StdioServerClient,
     StdioServerClientConfig, TurnStartParams,
 };
-use clawcr_safety::legacy_permissions::PermissionMode;
 use clawcr_tui::{run_interactive_tui, InteractiveTuiConfig};
 
 use crate::config;
@@ -238,7 +238,10 @@ fn handle_text_delta(output_format: OutputFormat, text: &str) {
             let _ = io::stdout().flush();
         }
         OutputFormat::StreamJson => {
-            println!("{}", serde_json::json!({ "type": "text_delta", "text": text }));
+            println!(
+                "{}",
+                serde_json::json!({ "type": "text_delta", "text": text })
+            );
         }
         OutputFormat::Json => {}
     }

@@ -176,7 +176,9 @@ pub fn resolve_provider_settings(
         let onboard_config = crate::onboarding::run_onboarding()?;
         save_config(&onboard_config)?;
 
-        let provider = onboard_config.provider.unwrap_or_else(|| "anthropic".to_string());
+        let provider = onboard_config
+            .provider
+            .unwrap_or_else(|| "anthropic".to_string());
         let model = default_model_for_provider(&provider, model_override.or(onboard_config.model));
         return Ok(ResolvedProviderSettings {
             provider: provider.clone(),
@@ -211,11 +213,11 @@ fn normalized_base_url(
     base_url: Option<String>,
 ) -> Option<String> {
     match provider_name {
-        Some("ollama") => Some(ensure_openai_v1(base_url.as_deref().unwrap_or(cli_ollama_url))),
+        Some("ollama") => Some(ensure_openai_v1(
+            base_url.as_deref().unwrap_or(cli_ollama_url),
+        )),
         Some("openai") => Some(ensure_openai_v1(
-            base_url
-                .as_deref()
-                .unwrap_or("https://api.openai.com"),
+            base_url.as_deref().unwrap_or("https://api.openai.com"),
         )),
         _ => base_url,
     }

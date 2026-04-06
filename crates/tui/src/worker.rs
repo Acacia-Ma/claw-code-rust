@@ -220,10 +220,7 @@ async fn run_worker_inner(
     Ok(())
 }
 
-fn handle_completed_item(
-    payload: ItemEventPayload,
-    event_tx: &mpsc::UnboundedSender<WorkerEvent>,
-) {
+fn handle_completed_item(payload: ItemEventPayload, event_tx: &mpsc::UnboundedSender<WorkerEvent>) {
     match payload.item {
         ItemEnvelope {
             item_kind: ItemKind::ToolCall,

@@ -103,10 +103,7 @@ fn render_composer(app: &TuiApp) -> Paragraph<'_> {
     let mut lines = vec![Line::from(vec![
         Span::styled("> ", Style::new().cyan().add_modifier(Modifier::BOLD)),
         if first_line.is_empty() {
-            Span::styled(
-                "Type a message or / for commands",
-                Style::new().dark_gray(),
-            )
+            Span::styled("Type a message or / for commands", Style::new().dark_gray())
         } else {
             Span::raw(first_line)
         },
@@ -140,8 +137,7 @@ fn render_composer(app: &TuiApp) -> Paragraph<'_> {
         }
     }
 
-    Paragraph::new(Text::from(lines))
-        .wrap(Wrap { trim: false })
+    Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false })
 }
 
 fn render_footer(app: &TuiApp) -> Paragraph<'static> {
@@ -192,7 +188,12 @@ fn append_transcript_item(lines: &mut Vec<Line<'static>>, item: &crate::events::
     match item.kind {
         TranscriptItemKind::User => {
             lines.push(Line::from(vec![
-                Span::styled("> ", Style::new().fg(item.kind.accent()).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "> ",
+                    Style::new()
+                        .fg(item.kind.accent())
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(item.body.clone()),
             ]));
         }
