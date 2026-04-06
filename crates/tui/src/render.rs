@@ -111,16 +111,11 @@ fn render_composer(app: &TuiApp) -> Paragraph<'_> {
 }
 
 fn render_footer(app: &TuiApp) -> Paragraph<'static> {
-    let usage = app
-        .last_turn_usage
-        .map(|(input, output)| format!("last turn {input} in / {output} out"))
-        .unwrap_or_else(|| "last turn n/a".to_string());
     let footer = format!(
-        "/model [/name]  /status  /exit  Ctrl+C quit  PgUp/PgDn scroll  turns {}  total {} in / {} out  {}",
+        "/model [/name]  /status  /exit  Ctrl+C quit  PgUp/PgDn scroll  turns {}  total {} in / {} out",
         app.turn_count,
         app.total_input_tokens,
-        app.total_output_tokens,
-        usage
+        app.total_output_tokens
     );
     Paragraph::new(footer).style(Style::new().dark_gray())
 }

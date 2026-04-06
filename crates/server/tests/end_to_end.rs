@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -11,7 +12,10 @@ use tokio::process::Command;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use clawcr_server::ServerRuntime;
+use clawcr_provider::{ModelProvider, ModelRequest, ModelResponse, StreamEvent};
+use clawcr_server::{ServerRuntime, ServerRuntimeDependencies};
+use clawcr_tools::ToolRegistry;
+use futures::stream;
 
 fn write_test_config(home_dir: &TempDir, listen: &[&str]) -> Result<()> {
     let config_dir = home_dir.path().join(".clawcr");
@@ -41,6 +45,26 @@ fn initialize_request(transport: &str) -> serde_json::Value {
             "opt_out_notification_methods": [],
         }
     })
+}
+
+struct PendingProvider;
+
+#[async_trait]
+impl ModelProvider for PendingProvider {
+    async fn complete(&self, _request: ModelRequest) -> Result<ModelResponse> {
+        anyhow::bail!("test provider does not support complete")
+    }
+
+    async fn stream(
+        &self,
+        _request: ModelRequest,
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<StreamEvent>> + Send>>> {
+        Ok(Box::pin(stream::pending()))
+    }
+
+    fn name(&self) -> &str {
+        "pending-test-provider"
+    }
 }
 
 #[tokio::test]
@@ -152,7 +176,14 @@ async fn websocket_listener_supports_handshake_subscription_and_turn_lifecycle()
         port
     };
     let bind_address = format!("127.0.0.1:{port}");
-    let runtime = ServerRuntime::new(std::env::temp_dir());
+    let runtime = ServerRuntime::new(
+        std::env::temp_dir(),
+        ServerRuntimeDependencies::new(
+            Arc::new(PendingProvider),
+            Arc::new(ToolRegistry::new()),
+            "test-model".to_string(),
+        ),
+    );
     let listen = vec![format!("ws://{bind_address}")];
     let listener_task =
         tokio::spawn(
@@ -237,7 +268,20 @@ async fn websocket_listener_supports_handshake_subscription_and_turn_lifecycle()
         ))
         .await?;
 
-    let turn_start_messages = read_n_websocket_json(&mut socket, 2).await?;
+    let turn_start_messages = read_until_websocket_json(
+        &mut socket,
+        |messages| {
+            messages
+                .iter()
+                .any(|value| value.get("method") == Some(&serde_json::json!("turn/started")))
+                && messages
+                    .iter()
+                    .any(|value| value.get("id") == Some(&serde_json::json!(3)))
+        },
+        4,
+    )
+    .await
+    .context("read turn/start websocket messages")?;
     let turn_started = turn_start_messages
         .iter()
         .find(|value| value.get("method") == Some(&serde_json::json!("turn/started")))
@@ -271,7 +315,23 @@ async fn websocket_listener_supports_handshake_subscription_and_turn_lifecycle()
         ))
         .await?;
 
-    let interrupt_messages = read_n_websocket_json(&mut socket, 3).await?;
+    let interrupt_messages = read_until_websocket_json(
+        &mut socket,
+        |messages| {
+            messages
+                .iter()
+                .any(|value| value.get("id") == Some(&serde_json::json!(4)))
+                && messages.iter().any(|value| {
+                    value.get("method") == Some(&serde_json::json!("turn/interrupted"))
+                })
+                && messages
+                    .iter()
+                    .any(|value| value.get("method") == Some(&serde_json::json!("turn/completed")))
+        },
+        8,
+    )
+    .await
+    .context("read turn/interrupt websocket messages")?;
     let interrupt_response = interrupt_messages
         .iter()
         .find(|value| value.get("id") == Some(&serde_json::json!(4)))
@@ -333,6 +393,26 @@ async fn read_n_websocket_json(
         values.push(read_websocket_json(socket).await?);
     }
     Ok(values)
+}
+
+async fn read_until_websocket_json<F>(
+    socket: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    predicate: F,
+    max_messages: usize,
+) -> Result<Vec<serde_json::Value>>
+where
+    F: Fn(&[serde_json::Value]) -> bool,
+{
+    let mut values = Vec::new();
+    while values.len() < max_messages {
+        values.push(read_websocket_json(socket).await?);
+        if predicate(&values) {
+            return Ok(values);
+        }
+    }
+    anyhow::bail!("did not observe expected websocket messages within {max_messages} frames")
 }
 
 async fn parse_stdio_json_line(

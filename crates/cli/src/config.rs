@@ -4,8 +4,6 @@ use anyhow::{Context, Result};
 use clawcr_utils::{current_user_config_file, FileSystemConfigPathResolver};
 use serde::{Deserialize, Serialize};
 
-use clawcr_provider::ModelProvider;
-
 /// Persisted provider configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -19,10 +17,16 @@ pub struct AppConfig {
     pub api_key: Option<String>,
 }
 
-/// The fully-resolved provider ready for use.
-pub struct ResolvedProvider {
-    pub provider: Box<dyn ModelProvider>,
+/// The fully-resolved provider settings that can be forwarded to a server process.
+pub struct ResolvedProviderSettings {
+    /// Normalized provider name.
+    pub provider: String,
+    /// Final model identifier.
     pub model: String,
+    /// Optional provider base URL override.
+    pub base_url: Option<String>,
+    /// Optional provider API key override.
+    pub api_key: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -135,47 +139,55 @@ fn env_config() -> AppConfig {
 // Provider resolution: CLI flags > env vars > config file > onboarding
 // ---------------------------------------------------------------------------
 
-pub fn resolve_provider(
+/// Resolves provider settings without constructing a local provider instance.
+pub fn resolve_provider_settings(
     cli_provider: Option<&str>,
     cli_model: Option<&str>,
     cli_ollama_url: &str,
     interactive: bool,
-) -> Result<ResolvedProvider> {
+) -> Result<ResolvedProviderSettings> {
     let env = env_config();
     let file = load_config().unwrap_or_default();
 
-    // Merge layers: CLI > env > file
     let provider_name = cli_provider
-        .map(|s| s.to_string())
+        .map(str::to_string)
         .or(env.provider.clone())
         .or(file.provider.clone());
-
     let api_key = env.api_key.clone().or(file.api_key.clone());
     let base_url = env.base_url.clone().or(file.base_url.clone());
     let model_override = cli_model
-        .map(|s| s.to_string())
+        .map(str::to_string)
         .or(env.model.clone())
         .or(file.model.clone());
 
-    // If we have a provider, build it
-    if let Some(ref name) = provider_name {
-        return build_provider(name, model_override, api_key, base_url, cli_ollama_url);
+    if let Some(name) = provider_name {
+        let normalized_base_url =
+            normalized_base_url(cli_ollama_url, Some(name.as_str()), base_url);
+        return Ok(ResolvedProviderSettings {
+            model: default_model_for_provider(&name, model_override),
+            provider: name,
+            base_url: normalized_base_url,
+            api_key,
+        });
     }
 
-    // Nothing resolved — try onboarding or error
     if interactive {
         eprintln!("No provider configured. Starting first-run setup...\n");
         let onboard_config = crate::onboarding::run_onboarding()?;
         save_config(&onboard_config)?;
 
-        let name = onboard_config.provider.as_deref().unwrap_or("stub");
-        return build_provider(
-            name,
-            model_override.or(onboard_config.model),
-            onboard_config.api_key,
-            onboard_config.base_url,
-            cli_ollama_url,
-        );
+        let provider = onboard_config.provider.unwrap_or_else(|| "anthropic".to_string());
+        let model = default_model_for_provider(&provider, model_override.or(onboard_config.model));
+        return Ok(ResolvedProviderSettings {
+            provider: provider.clone(),
+            model,
+            base_url: normalized_base_url(
+                cli_ollama_url,
+                Some(provider.as_str()),
+                onboard_config.base_url,
+            ),
+            api_key: onboard_config.api_key,
+        });
     }
 
     anyhow::bail!(
@@ -184,66 +196,28 @@ pub fn resolve_provider(
     )
 }
 
-fn build_provider(
-    name: &str,
-    model: Option<String>,
-    api_key: Option<String>,
-    base_url: Option<String>,
-    ollama_url: &str,
-) -> Result<ResolvedProvider> {
-    match name {
-        "anthropic" => {
-            let key = api_key
-                .context("Anthropic provider requires ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN")?;
-            let default_model = "claude-sonnet-4-20250514".to_string();
-            let model = model.unwrap_or(default_model);
-            eprintln!("Using Anthropic API (model: {})", model);
+fn default_model_for_provider(name: &str, model: Option<String>) -> String {
+    model.unwrap_or_else(|| match name {
+        "anthropic" => "claude-sonnet-4-20250514".to_string(),
+        "ollama" => "qwen3.5:9b".to_string(),
+        "openai" => "gpt-4o".to_string(),
+        _ => "claude-sonnet-4-20250514".to_string(),
+    })
+}
 
-            let p = if let Some(url) = base_url {
-                eprintln!("  base_url: {}", url);
-                clawcr_provider::anthropic::AnthropicProvider::new_with_url(&key, url)
-            } else {
-                clawcr_provider::anthropic::AnthropicProvider::new(&key)
-            };
-            Ok(ResolvedProvider {
-                provider: Box::new(p),
-                model,
-            })
-        }
-        "ollama" => {
-            let model = model.unwrap_or_else(|| "qwen3.5:9b".into());
-            let raw_url = base_url.as_deref().unwrap_or(ollama_url);
-            let url = ensure_openai_v1(raw_url);
-            eprintln!("Using Ollama (url: {}, model: {})", url, model);
-            let mut p = clawcr_provider::openai_compat::OpenAICompatProvider::new(&url);
-            if let Some(ref key) = api_key {
-                p = p.with_api_key(key);
-            }
-            Ok(ResolvedProvider {
-                provider: Box::new(p),
-                model,
-            })
-        }
-        "openai" => {
-            let raw_url = base_url.unwrap_or_else(|| "https://api.openai.com".into());
-            let url = ensure_openai_v1(&raw_url);
-            let model = model.unwrap_or_else(|| "gpt-4o".into());
-            eprintln!("Using OpenAI-compat (url: {}, model: {})", url, model);
-            let mut p = clawcr_provider::openai_compat::OpenAICompatProvider::new(&url);
-            if let Some(key) = api_key {
-                p = p.with_api_key(key);
-            }
-            Ok(ResolvedProvider {
-                provider: Box::new(p),
-                model,
-            })
-        }
-        other => {
-            anyhow::bail!(
-                "Unknown provider '{}'. Use: anthropic, ollama, openai",
-                other
-            );
-        }
+fn normalized_base_url(
+    cli_ollama_url: &str,
+    provider_name: Option<&str>,
+    base_url: Option<String>,
+) -> Option<String> {
+    match provider_name {
+        Some("ollama") => Some(ensure_openai_v1(base_url.as_deref().unwrap_or(cli_ollama_url))),
+        Some("openai") => Some(ensure_openai_v1(
+            base_url
+                .as_deref()
+                .unwrap_or("https://api.openai.com"),
+        )),
+        _ => base_url,
     }
 }
 

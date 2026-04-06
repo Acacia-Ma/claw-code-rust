@@ -1,11 +1,12 @@
 use std::io::{self, Write};
-use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Args;
-use clawcr_core::{query, Message, QueryEvent, SessionConfig, SessionState};
+use clawcr_server::{
+    InputItem, ItemEnvelope, ItemKind, ServerEvent, SessionStartParams, StdioServerClient,
+    StdioServerClientConfig, TurnStartParams,
+};
 use clawcr_safety::legacy_permissions::PermissionMode;
-use clawcr_tools::{ToolOrchestrator, ToolRegistry};
 use clawcr_tui::{run_interactive_tui, InteractiveTuiConfig};
 
 use crate::config;
@@ -37,11 +38,11 @@ impl std::str::FromStr for OutputFormat {
 /// Common agent-facing flags accepted by the main `clawcr` command.
 #[derive(Debug, Args)]
 pub struct AgentCli {
-    /// Model to use (e.g. claude-sonnet-4-20250514, qwen3.5:9b)
+    /// Model to use for future turns.
     #[arg(short, long)]
     pub model: Option<String>,
 
-    /// System prompt
+    /// System prompt placeholder retained for CLI compatibility.
     #[arg(
         short,
         long,
@@ -50,31 +51,31 @@ pub struct AgentCli {
     )]
     pub system: String,
 
-    /// Permission mode: auto, interactive, deny
+    /// Permission mode: auto, interactive, deny.
     #[arg(short, long, default_value = "auto")]
     pub permission: String,
 
-    /// Run a single prompt non-interactively then exit
+    /// Run a single prompt non-interactively then exit.
     #[arg(short = 'q', long)]
     pub query: Option<String>,
 
-    /// Run a single prompt non-interactively then exit (alias for --query)
+    /// Run a single prompt non-interactively then exit (alias for --query).
     #[arg(long)]
     pub print: Option<String>,
 
-    /// Output format for non-interactive mode: text (default), stream-json, json
+    /// Output format for non-interactive mode: text (default), stream-json, json.
     #[arg(long, default_value = "text")]
     pub output_format: OutputFormat,
 
-    /// Maximum turns per conversation
+    /// Maximum turns placeholder retained for CLI compatibility.
     #[arg(long, default_value = "100")]
     pub max_turns: usize,
 
-    /// Provider: anthropic, ollama, openai (auto-detected if not set)
+    /// Provider: anthropic, ollama, openai (auto-detected if not set).
     #[arg(long)]
     pub provider: Option<String>,
 
-    /// Ollama server URL
+    /// Ollama server URL.
     #[arg(long, default_value = "http://localhost:11434")]
     pub ollama_url: String,
 }
@@ -82,7 +83,6 @@ pub struct AgentCli {
 /// Runs the interactive or one-shot coding-agent entrypoint.
 pub async fn run_agent(cli: AgentCli) -> Result<()> {
     let cwd = std::env::current_dir()?;
-
     let single_prompt = cli.query.or(cli.print);
     let interactive = single_prompt.is_none();
 
@@ -91,7 +91,7 @@ pub async fn run_agent(cli: AgentCli) -> Result<()> {
         "interactive" => PermissionMode::Interactive,
         "deny" => PermissionMode::Deny,
         other => {
-            eprintln!("unknown permission mode '{}', using auto", other);
+            eprintln!("unknown permission mode '{other}', using auto");
             PermissionMode::AutoApprove
         }
     };
@@ -100,178 +100,220 @@ pub async fn run_agent(cli: AgentCli) -> Result<()> {
         config::ensure_ollama(&cli.ollama_url, interactive)?;
     }
 
-    let resolved = config::resolve_provider(
+    let resolved = config::resolve_provider_settings(
         cli.provider.as_deref(),
         cli.model.as_deref(),
         &cli.ollama_url,
         interactive,
     )?;
+    let server_env = server_env_overrides(&resolved);
 
     if interactive {
         run_interactive_tui(InteractiveTuiConfig {
             model: resolved.model,
-            system_prompt: cli.system,
-            max_turns: cli.max_turns,
-            permission_mode,
             cwd,
-            provider: resolved.provider,
+            server_env,
             startup_prompt: None,
         })
         .await?;
         return Ok(());
     }
 
-    let mut registry = ToolRegistry::new();
-    clawcr_tools::register_builtin_tools(&mut registry);
-    let registry = Arc::new(registry);
-    let orchestrator = ToolOrchestrator::new(Arc::clone(&registry));
-
-    let session_config = SessionConfig {
-        model: resolved.model,
-        system_prompt: cli.system.clone(),
-        max_turns: cli.max_turns,
-        permission_mode,
-        ..Default::default()
-    };
-
-    let mut session = SessionState::new(session_config, cwd);
-
     if let Some(prompt) = single_prompt {
-        session.push_message(Message::user(prompt));
-        let on_event = make_event_callback(cli.output_format);
-        query(
-            &mut session,
-            resolved.provider.as_ref(),
-            Arc::clone(&registry),
-            &orchestrator,
-            Some(on_event),
+        run_one_shot_via_server(
+            &cwd,
+            &resolved.model,
+            server_env,
+            cli.output_format,
+            prompt,
+            permission_mode,
         )
         .await?;
-
-        if cli.output_format == OutputFormat::Json {
-            let last_assistant = session
-                .messages
-                .iter()
-                .rev()
-                .find(|message| matches!(message.role, clawcr_core::Role::Assistant));
-            if let Some(message) = last_assistant {
-                let text: String = message
-                    .content
-                    .iter()
-                    .filter_map(|block| match block {
-                        clawcr_core::ContentBlock::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "type": "result",
-                        "text": text,
-                        "session_id": session.id,
-                        "input_tokens": session.total_input_tokens,
-                        "output_tokens": session.total_output_tokens,
-                    })
-                );
-            }
-        }
-
-        return Ok(());
     }
     Ok(())
 }
 
-fn make_event_callback(format: OutputFormat) -> Arc<dyn Fn(QueryEvent) + Send + Sync> {
-    Arc::new(move |event| match format {
-        OutputFormat::Text => handle_event_text(event),
-        OutputFormat::StreamJson => handle_event_stream_json(event),
-        OutputFormat::Json => match &event {
-            QueryEvent::ToolUseStart { name, .. } => {
-                eprintln!("⚡ calling tool: {}", name);
-            }
-            QueryEvent::ToolResult {
-                is_error, content, ..
-            } => {
-                if *is_error {
-                    eprintln!("❌ tool error: {}", truncate(content, 200));
-                }
-            }
-            _ => {}
-        },
-    })
+fn server_env_overrides(resolved: &config::ResolvedProviderSettings) -> Vec<(String, String)> {
+    let mut env = vec![
+        ("CLAWCR_PROVIDER".to_string(), resolved.provider.clone()),
+        ("CLAWCR_MODEL".to_string(), resolved.model.clone()),
+    ];
+    if let Some(base_url) = &resolved.base_url {
+        env.push(("CLAWCR_BASE_URL".to_string(), base_url.clone()));
+    }
+    if let Some(api_key) = &resolved.api_key {
+        env.push(("CLAWCR_API_KEY".to_string(), api_key.clone()));
+    }
+    env
 }
 
-fn handle_event_text(event: QueryEvent) {
-    match event {
-        QueryEvent::TextDelta(text) => {
-            print!("{}", text);
+async fn run_one_shot_via_server(
+    cwd: &std::path::Path,
+    model: &str,
+    server_env: Vec<(String, String)>,
+    output_format: OutputFormat,
+    prompt: String,
+    permission_mode: PermissionMode,
+) -> Result<()> {
+    let approval_policy = match permission_mode {
+        PermissionMode::AutoApprove => Some("auto".to_string()),
+        PermissionMode::Interactive => Some("interactive".to_string()),
+        PermissionMode::Deny => Some("deny".to_string()),
+    };
+    let mut client = StdioServerClient::spawn(StdioServerClientConfig {
+        program: std::env::current_exe()?,
+        workspace_root: Some(cwd.to_path_buf()),
+        env: server_env,
+    })
+    .await?;
+    let _ = client.initialize().await?;
+    let session = client
+        .session_start(SessionStartParams {
+            cwd: cwd.to_path_buf(),
+            ephemeral: true,
+            title: None,
+            model: Some(model.to_string()),
+        })
+        .await?;
+    let _ = client
+        .turn_start(TurnStartParams {
+            session_id: session.session_id,
+            input: vec![InputItem::Text { text: prompt }],
+            model: Some(model.to_string()),
+            sandbox: None,
+            approval_policy,
+            cwd: None,
+        })
+        .await?;
+
+    let mut assistant_text = String::new();
+    while let Some((method, event)) = client.recv_event().await? {
+        match event {
+            ServerEvent::ItemDelta { payload, .. } if method == "item/agentMessage/delta" => {
+                assistant_text.push_str(&payload.delta);
+                handle_text_delta(output_format, &payload.delta);
+            }
+            ServerEvent::ItemCompleted(payload) => {
+                handle_completed_item(output_format, payload.item);
+            }
+            ServerEvent::TurnCompleted(payload) => {
+                if output_format == OutputFormat::Text {
+                    println!();
+                } else if output_format == OutputFormat::StreamJson {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "type": "turn_complete",
+                            "stop_reason": format!("{:?}", payload.turn.status),
+                        })
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "type": "result",
+                            "text": assistant_text,
+                            "session_id": session.session_id,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                        })
+                    );
+                }
+                break;
+            }
+            ServerEvent::TurnFailed(payload) => {
+                anyhow::bail!("turn failed with status {:?}", payload.turn.status);
+            }
+            _ => {}
+        }
+    }
+    client.shutdown().await?;
+    Ok(())
+}
+
+fn handle_text_delta(output_format: OutputFormat, text: &str) {
+    match output_format {
+        OutputFormat::Text => {
+            print!("{text}");
             let _ = io::stdout().flush();
         }
-        QueryEvent::ToolUseStart { name, .. } => {
-            eprintln!("\n⚡ calling tool: {}", name);
+        OutputFormat::StreamJson => {
+            println!("{}", serde_json::json!({ "type": "text_delta", "text": text }));
         }
-        QueryEvent::ToolResult {
-            is_error, content, ..
-        } => {
-            if is_error {
-                eprintln!("❌ tool error: {}", truncate(&content, 200));
-            } else {
-                eprintln!("✅ tool done ({})", byte_summary(&content));
-            }
-        }
-        QueryEvent::TurnComplete { .. } => {
-            println!();
-        }
-        QueryEvent::Usage {
-            input_tokens,
-            output_tokens,
-            ..
-        } => {
-            eprintln!("  [tokens: {} in / {} out]", input_tokens, output_tokens);
-        }
+        OutputFormat::Json => {}
     }
 }
 
-fn handle_event_stream_json(event: QueryEvent) {
-    let object = match event {
-        QueryEvent::TextDelta(text) => {
-            serde_json::json!({ "type": "text_delta", "text": text })
-        }
-        QueryEvent::ToolUseStart { id, name } => {
-            serde_json::json!({ "type": "tool_use_start", "id": id, "name": name })
-        }
-        QueryEvent::ToolResult {
-            tool_use_id,
-            content,
-            is_error,
+fn handle_completed_item(output_format: OutputFormat, item: ItemEnvelope) {
+    match item {
+        ItemEnvelope {
+            item_kind: ItemKind::ToolCall,
+            payload,
+            ..
         } => {
-            serde_json::json!({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "content": content,
-                "is_error": is_error,
-            })
+            let name = payload
+                .get("tool_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("tool");
+            match output_format {
+                OutputFormat::Text => eprintln!("\n⚡ calling tool: {name}"),
+                OutputFormat::StreamJson => println!(
+                    "{}",
+                    serde_json::json!({
+                        "type": "tool_use_start",
+                        "id": payload.get("tool_use_id").cloned().unwrap_or(serde_json::Value::Null),
+                        "name": name,
+                    })
+                ),
+                OutputFormat::Json => eprintln!("⚡ calling tool: {name}"),
+            }
         }
-        QueryEvent::TurnComplete { stop_reason } => {
-            serde_json::json!({ "type": "turn_complete", "stop_reason": format!("{stop_reason:?}") })
-        }
-        QueryEvent::Usage {
-            input_tokens,
-            output_tokens,
-            cache_creation_input_tokens,
-            cache_read_input_tokens,
+        ItemEnvelope {
+            item_kind: ItemKind::ToolResult,
+            payload,
+            ..
         } => {
-            serde_json::json!({
-                "type": "usage",
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cache_creation_input_tokens": cache_creation_input_tokens,
-                "cache_read_input_tokens": cache_read_input_tokens,
-            })
+            let content = payload
+                .get("content")
+                .map(render_json_value_text)
+                .unwrap_or_default();
+            let is_error = payload
+                .get("is_error")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            match output_format {
+                OutputFormat::Text => {
+                    if is_error {
+                        eprintln!("❌ tool error: {}", truncate(&content, 200));
+                    } else {
+                        eprintln!("✅ tool done ({})", byte_summary(&content));
+                    }
+                }
+                OutputFormat::StreamJson => println!(
+                    "{}",
+                    serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": payload.get("tool_use_id").cloned().unwrap_or(serde_json::Value::Null),
+                        "content": content,
+                        "is_error": is_error,
+                    })
+                ),
+                OutputFormat::Json => {
+                    if is_error {
+                        eprintln!("❌ tool error: {}", truncate(&content, 200));
+                    }
+                }
+            }
         }
-    };
-    println!("{object}");
+        _ => {}
+    }
+}
+
+fn render_json_value_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        _ => value.to_string(),
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -297,6 +339,8 @@ fn byte_summary(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]

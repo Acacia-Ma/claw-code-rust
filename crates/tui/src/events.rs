@@ -11,13 +11,6 @@ pub(crate) enum WorkerEvent {
     ToolCall { name: String },
     /// A tool call finished.
     ToolResult { content: String, is_error: bool },
-    /// The current turn reported token usage.
-    Usage {
-        /// Input tokens used by the current turn.
-        input_tokens: usize,
-        /// Output tokens used by the current turn.
-        output_tokens: usize,
-    },
     /// The current turn completed successfully.
     TurnFinished {
         /// Human-readable stop reason.

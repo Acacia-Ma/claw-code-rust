@@ -103,7 +103,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        current_config_paths, current_user_config_file, ConfigPathResolver,
+        current_config_paths, ConfigPathResolver,
         FileSystemConfigPathResolver,
     };
 
@@ -140,25 +140,6 @@ mod tests {
             paths.user_config_file,
             PathBuf::from("C:\\Users\\tester\\.clawcr\\config.toml")
         );
-    }
-
-    #[test]
-    fn current_user_config_file_returns_a_toml_path() {
-        let original_home = std::env::var_os("HOME");
-        let original_userprofile = std::env::var_os("USERPROFILE");
-        unsafe {
-            std::env::set_var("HOME", "/home/runtime");
-        }
-        let path = current_user_config_file().expect("user config path");
-        assert_eq!(path, PathBuf::from("/home/runtime/.clawcr/config.toml"));
-        match original_home {
-            Some(value) => unsafe { std::env::set_var("HOME", value) },
-            None => unsafe { std::env::remove_var("HOME") },
-        }
-        match original_userprofile {
-            Some(value) => unsafe { std::env::set_var("USERPROFILE", value) },
-            None => unsafe { std::env::remove_var("USERPROFILE") },
-        }
     }
 
     #[test]

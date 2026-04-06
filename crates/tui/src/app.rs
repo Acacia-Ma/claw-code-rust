@@ -50,8 +50,6 @@ pub(crate) struct TuiApp {
     pub(crate) total_input_tokens: usize,
     /// Total output tokens accumulated in the session.
     pub(crate) total_output_tokens: usize,
-    /// Most recent per-turn token usage summary.
-    pub(crate) last_turn_usage: Option<(usize, usize)>,
     /// Index of the assistant transcript item currently receiving streamed text.
     pending_assistant_index: Option<usize>,
     /// Background query worker owned by the UI.
@@ -66,11 +64,8 @@ impl TuiApp {
         let startup_prompt = config.startup_prompt.clone();
         let worker = QueryWorkerHandle::spawn(QueryWorkerConfig {
             model: config.model.clone(),
-            system_prompt: config.system_prompt,
-            max_turns: config.max_turns,
-            permission_mode: config.permission_mode,
             cwd: config.cwd.clone(),
-            provider: config.provider,
+            server_env: config.server_env,
         });
 
         let mut app = Self {
@@ -86,7 +81,6 @@ impl TuiApp {
             turn_count: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
-            last_turn_usage: None,
             pending_assistant_index: None,
             worker,
             should_quit: false,
@@ -263,20 +257,15 @@ impl TuiApp {
                 Ok(())
             }
             "/status" => {
-                let usage = self
-                    .last_turn_usage
-                    .map(|(input, output)| format!("last turn {input} in / {output} out"))
-                    .unwrap_or_else(|| "last turn n/a".to_string());
                 self.push_item(
                     TranscriptItemKind::System,
                     "Status",
                     format!(
-                        "turns: {}\nmodel: {}\ntokens: {} in / {} out\n{}\nbusy: {}",
+                        "turns: {}\nmodel: {}\ntokens: {} in / {} out\nbusy: {}",
                         self.turn_count,
                         self.model,
                         self.total_input_tokens,
                         self.total_output_tokens,
-                        usage,
                         self.busy
                     ),
                 );
@@ -353,12 +342,6 @@ impl TuiApp {
                 } else {
                     "Tool completed".to_string()
                 };
-            }
-            WorkerEvent::Usage {
-                input_tokens,
-                output_tokens,
-            } => {
-                self.last_turn_usage = Some((input_tokens, output_tokens));
             }
             WorkerEvent::TurnFinished {
                 stop_reason,
@@ -445,7 +428,6 @@ mod tests {
             turn_count: 3,
             total_input_tokens: 10,
             total_output_tokens: 20,
-            last_turn_usage: Some((4, 5)),
             pending_assistant_index: None,
             worker: QueryWorkerHandle::stub(),
             should_quit: false,
@@ -488,7 +470,7 @@ mod tests {
             vec![TranscriptItem::new(
                 TranscriptItemKind::System,
                 "Status",
-                "turns: 3\nmodel: test-model\ntokens: 10 in / 20 out\nlast turn 4 in / 5 out\nbusy: false",
+                "turns: 3\nmodel: test-model\ntokens: 10 in / 20 out\nbusy: false",
             )]
         );
     }

@@ -10,8 +10,6 @@ mod worker;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clawcr_provider::ModelProvider;
-use clawcr_safety::legacy_permissions::PermissionMode;
 
 pub use app::AppExit;
 
@@ -19,16 +17,10 @@ pub use app::AppExit;
 pub struct InteractiveTuiConfig {
     /// Model identifier used for requests and shown in the header.
     pub model: String,
-    /// System prompt supplied to the query loop.
-    pub system_prompt: String,
-    /// Maximum number of turns allowed in the interactive session.
-    pub max_turns: usize,
-    /// Permission mode used by tool execution.
-    pub permission_mode: PermissionMode,
     /// Working directory shown in the header and passed to the session.
     pub cwd: PathBuf,
-    /// Provider instance used for model requests.
-    pub provider: Box<dyn ModelProvider>,
+    /// Environment overrides applied to the spawned stdio server process.
+    pub server_env: Vec<(String, String)>,
     /// Optional prompt submitted immediately after the UI opens.
     pub startup_prompt: Option<String>,
 }

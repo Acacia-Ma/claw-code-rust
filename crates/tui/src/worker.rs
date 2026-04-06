@@ -1,40 +1,34 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tokio::{
     sync::mpsc,
     task::{JoinError, JoinHandle},
 };
 
-use clawcr_core::{query, Message, QueryEvent, SessionConfig, SessionState};
-use clawcr_provider::ModelProvider;
-use clawcr_safety::legacy_permissions::PermissionMode;
-use clawcr_tools::{ToolOrchestrator, ToolRegistry};
+use clawcr_core::TurnStatus;
+use clawcr_server::{
+    InputItem, ItemEnvelope, ItemEventPayload, ItemKind, ServerEvent, SessionStartParams,
+    StdioServerClient, StdioServerClientConfig, TurnEventPayload, TurnStartParams,
+};
 
 use crate::events::WorkerEvent;
 
-/// Immutable runtime configuration used to construct the background query worker.
+/// Immutable runtime configuration used to construct the background server client worker.
 pub(crate) struct QueryWorkerConfig {
-    /// Model identifier used for requests.
+    /// Model identifier used for new turns.
     pub(crate) model: String,
-    /// System prompt used for requests.
-    pub(crate) system_prompt: String,
-    /// Maximum number of turns allowed in the session.
-    pub(crate) max_turns: usize,
-    /// Permission mode used by tool execution.
-    pub(crate) permission_mode: PermissionMode,
-    /// Working directory used for the session.
+    /// Working directory used for the server session.
     pub(crate) cwd: PathBuf,
-    /// Provider instance used for requests.
-    pub(crate) provider: Box<dyn ModelProvider>,
+    /// Environment overrides applied to the spawned server child process.
+    pub(crate) server_env: Vec<(String, String)>,
 }
 
 /// Commands accepted by the background query worker.
 enum WorkerCommand {
     /// Submit a new user prompt to the session.
     SubmitPrompt(String),
-    /// Update the model used for future requests.
+    /// Update the model used for future turns.
     SetModel(String),
     /// Stop the worker loop.
     Shutdown,
@@ -80,7 +74,6 @@ impl QueryWorkerHandle {
     /// Stops the worker task and waits for it to finish.
     pub(crate) async fn shutdown(self) -> Result<()> {
         let _ = self.command_tx.send(WorkerCommand::Shutdown);
-        self.join_handle.abort();
         let _ = self.join_handle.await.map_err(map_join_error);
         Ok(())
     }
@@ -105,83 +98,164 @@ async fn run_worker(
     mut command_rx: mpsc::UnboundedReceiver<WorkerCommand>,
     event_tx: mpsc::UnboundedSender<WorkerEvent>,
 ) {
-    let mut registry = ToolRegistry::new();
-    clawcr_tools::register_builtin_tools(&mut registry);
-    let registry = Arc::new(registry);
-    let orchestrator = ToolOrchestrator::new(Arc::clone(&registry));
+    if let Err(error) = run_worker_inner(config, &mut command_rx, &event_tx).await {
+        let _ = event_tx.send(WorkerEvent::TurnFailed {
+            message: error.to_string(),
+            turn_count: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+        });
+    }
+}
 
-    let mut session = SessionState::new(
-        SessionConfig {
-            model: config.model,
-            system_prompt: config.system_prompt,
-            max_turns: config.max_turns,
-            permission_mode: config.permission_mode,
-            ..Default::default()
-        },
-        config.cwd,
-    );
-    let provider = config.provider;
+async fn run_worker_inner(
+    config: QueryWorkerConfig,
+    command_rx: &mut mpsc::UnboundedReceiver<WorkerCommand>,
+    event_tx: &mpsc::UnboundedSender<WorkerEvent>,
+) -> Result<()> {
+    let mut client = StdioServerClient::spawn(StdioServerClientConfig {
+        program: std::env::current_exe().context("resolve current executable for server launch")?,
+        workspace_root: Some(config.cwd.clone()),
+        env: config.server_env,
+    })
+    .await?;
+    let _ = client.initialize().await?;
+    let session = client
+        .session_start(SessionStartParams {
+            cwd: config.cwd.clone(),
+            ephemeral: false,
+            title: None,
+            model: Some(config.model.clone()),
+        })
+        .await?;
 
-    while let Some(command) = command_rx.recv().await {
-        match command {
-            WorkerCommand::SubmitPrompt(prompt) => {
-                let _ = event_tx.send(WorkerEvent::TurnStarted);
-                session.push_message(Message::user(prompt));
+    let session_id = session.session_id;
+    let mut model = config.model;
+    let mut turn_count = 0usize;
+    let total_input_tokens = 0usize;
+    let total_output_tokens = 0usize;
 
-                let callback_tx = event_tx.clone();
-                let callback = Arc::new(move |event: QueryEvent| {
-                    let mapped = match event {
-                        QueryEvent::TextDelta(text) => WorkerEvent::TextDelta(text),
-                        QueryEvent::ToolUseStart { name, .. } => WorkerEvent::ToolCall { name },
-                        QueryEvent::ToolResult {
-                            content, is_error, ..
-                        } => WorkerEvent::ToolResult { content, is_error },
-                        QueryEvent::TurnComplete { .. } => return,
-                        QueryEvent::Usage {
-                            input_tokens,
-                            output_tokens,
-                            ..
-                        } => WorkerEvent::Usage {
-                            input_tokens,
-                            output_tokens,
-                        },
-                    };
-                    let _ = callback_tx.send(mapped);
-                });
-
-                let query_result = query(
-                    &mut session,
-                    provider.as_ref(),
-                    Arc::clone(&registry),
-                    &orchestrator,
-                    Some(callback),
-                )
-                .await;
-
-                match query_result {
-                    Ok(()) => {
-                        let _ = event_tx.send(WorkerEvent::TurnFinished {
-                            stop_reason: "completed".to_string(),
-                            turn_count: session.turn_count,
-                            total_input_tokens: session.total_input_tokens,
-                            total_output_tokens: session.total_output_tokens,
-                        });
+    loop {
+        tokio::select! {
+            maybe_command = command_rx.recv() => {
+                match maybe_command {
+                    Some(WorkerCommand::SubmitPrompt(prompt)) => {
+                        let start_result = client.turn_start(TurnStartParams {
+                            session_id,
+                            input: vec![InputItem::Text { text: prompt }],
+                            model: Some(model.clone()),
+                            sandbox: None,
+                            approval_policy: None,
+                            cwd: None,
+                        }).await;
+                        if let Err(error) = start_result {
+                            let _ = event_tx.send(WorkerEvent::TurnFailed {
+                                message: error.to_string(),
+                                turn_count,
+                                total_input_tokens,
+                                total_output_tokens,
+                            });
+                        }
                     }
-                    Err(error) => {
-                        let _ = event_tx.send(WorkerEvent::TurnFailed {
-                            message: error.to_string(),
-                            turn_count: session.turn_count,
-                            total_input_tokens: session.total_input_tokens,
-                            total_output_tokens: session.total_output_tokens,
-                        });
+                    Some(WorkerCommand::SetModel(next_model)) => {
+                        model = next_model;
+                    }
+                    Some(WorkerCommand::Shutdown) | None => {
+                        client.shutdown().await?;
+                        break;
                     }
                 }
             }
-            WorkerCommand::SetModel(model) => {
-                session.config.model = model;
+            notification = client.recv_event() => {
+                match notification? {
+                    Some((method, event)) => {
+                        match method.as_str() {
+                            "turn/started" => {
+                                let _ = event_tx.send(WorkerEvent::TurnStarted);
+                            }
+                            "item/agentMessage/delta" => {
+                                if let ServerEvent::ItemDelta { payload, .. } = event {
+                                    let _ = event_tx.send(WorkerEvent::TextDelta(payload.delta));
+                                }
+                            }
+                            "item/completed" => {
+                                if let ServerEvent::ItemCompleted(payload) = event {
+                                    handle_completed_item(payload, event_tx);
+                                }
+                            }
+                            "turn/completed" => {
+                                if let ServerEvent::TurnCompleted(payload) = event {
+                                    let completed = payload.turn.status == TurnStatus::Completed
+                                        || payload.turn.status == TurnStatus::Interrupted;
+                                    if completed {
+                                        turn_count += 1;
+                                        let _ = event_tx.send(WorkerEvent::TurnFinished {
+                                            stop_reason: format!("{:?}", payload.turn.status),
+                                            turn_count,
+                                            total_input_tokens,
+                                            total_output_tokens,
+                                        });
+                                    }
+                                }
+                            }
+                            "turn/failed" => {
+                                if let ServerEvent::TurnFailed(TurnEventPayload { turn, .. }) = event {
+                                    let _ = event_tx.send(WorkerEvent::TurnFailed {
+                                        message: format!("turn failed with status {:?}", turn.status),
+                                        turn_count,
+                                        total_input_tokens,
+                                        total_output_tokens,
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    None => break,
+                }
             }
-            WorkerCommand::Shutdown => break,
         }
+    }
+
+    Ok(())
+}
+
+fn handle_completed_item(
+    payload: ItemEventPayload,
+    event_tx: &mpsc::UnboundedSender<WorkerEvent>,
+) {
+    match payload.item {
+        ItemEnvelope {
+            item_kind: ItemKind::ToolCall,
+            payload,
+            ..
+        } => {
+            let name = payload
+                .get("tool_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("tool")
+                .to_string();
+            let _ = event_tx.send(WorkerEvent::ToolCall { name });
+        }
+        ItemEnvelope {
+            item_kind: ItemKind::ToolResult,
+            payload,
+            ..
+        } => {
+            let content = payload
+                .get("content")
+                .map(serde_json::Value::to_string)
+                .unwrap_or_else(|| "\"\"".to_string());
+            let is_error = payload
+                .get("is_error")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let _ = event_tx.send(WorkerEvent::ToolResult {
+                content: content.trim_matches('"').to_string(),
+                is_error,
+            });
+        }
+        _ => {}
     }
 }
 

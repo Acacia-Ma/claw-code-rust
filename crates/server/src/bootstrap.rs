@@ -3,9 +3,13 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 use clawcr_core::{AppConfigLoader, FileSystemAppConfigLoader};
+use clawcr_tools::ToolRegistry;
 use clawcr_utils::FileSystemConfigPathResolver;
 
-use crate::{resolve_listen_targets, run_listeners, ListenTarget, ServerRuntime};
+use crate::{
+    execution::ServerRuntimeDependencies,
+    load_server_provider, resolve_listen_targets, run_listeners, ListenTarget, ServerRuntime,
+};
 
 /// Command-line arguments accepted by the standalone server process entrypoint.
 #[derive(Debug, Clone, Parser)]
@@ -50,7 +54,17 @@ pub async fn run_server_process(args: ServerProcessArgs) -> Result<()> {
         "loaded server config"
     );
 
-    let runtime = ServerRuntime::new(resolver.user_config_dir());
+    let mut registry = ToolRegistry::new();
+    clawcr_tools::register_builtin_tools(&mut registry);
+    let provider = load_server_provider(&resolver.user_config_file(), config.default_model.as_deref())?;
+    let runtime = ServerRuntime::new(
+        resolver.user_config_dir(),
+        ServerRuntimeDependencies::new(
+            provider.provider,
+            std::sync::Arc::new(registry),
+            provider.default_model,
+        ),
+    );
     tracing::info!("server bootstrap completed; starting listeners");
     tokio::select! {
         result = run_listeners(runtime, &config.server.listen) => {

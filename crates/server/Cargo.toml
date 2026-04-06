@@ -14,6 +14,9 @@ path = "src/main.rs"
 
 [dependencies]
 clawcr-core = { workspace = true }
+clawcr-provider = { workspace = true }
+clawcr-safety = { workspace = true }
+clawcr-tools = { workspace = true }
 clawcr-utils = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,8 +29,10 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }
+toml = { workspace = true }
 tokio-tungstenite = "0.28"
 
 [dev-dependencies]
+async-trait = { workspace = true }
 pretty_assertions = "1"
 tempfile = "3"
