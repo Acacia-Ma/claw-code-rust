@@ -17,11 +17,13 @@ futures = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+smol_str = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
