@@ -2,7 +2,9 @@ use std::{collections::VecDeque, path::PathBuf, sync::Arc};
 
 use tokio::{sync::Mutex, task::JoinHandle};
 
-use clawcr_core::{ModelCatalog, SessionConfig, SessionId, SessionRecord, SessionState};
+use clawcr_core::{
+    default_base_instructions, ModelCatalog, SessionConfig, SessionId, SessionRecord, SessionState,
+};
 use clawcr_provider::ModelProvider;
 use clawcr_tools::ToolRegistry;
 
@@ -50,8 +52,9 @@ impl ServerRuntimeDependencies {
         let base_instructions = self
             .model_catalog
             .get(&model)
-            .map(|model| model.base_instructions.clone())
-            .unwrap_or_default();
+            .map(|model| model.base_instructions.trim().to_string())
+            .filter(|instructions| !instructions.is_empty())
+            .unwrap_or_else(|| default_base_instructions().to_string());
         let mut state = SessionState::new(
             SessionConfig {
                 model,
@@ -68,8 +71,9 @@ impl ServerRuntimeDependencies {
     pub(crate) fn base_instructions_for_model(&self, model: &str) -> String {
         self.model_catalog
             .get(model)
-            .map(|model| model.base_instructions.clone())
-            .unwrap_or_default()
+            .map(|model| model.base_instructions.trim().to_string())
+            .filter(|instructions| !instructions.is_empty())
+            .unwrap_or_else(|| default_base_instructions().to_string())
     }
 }
 

@@ -5,6 +5,8 @@ use crate::{
     ReasoningLevel, TruncationPolicyConfig,
 };
 
+const DEFAULT_BASE_INSTRUCTIONS: &str = include_str!("../default_base_instructions.txt");
+
 /// Filesystem-independent loader for the built-in model catalog bundled with the binary.
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinModelCatalog {
@@ -66,6 +68,11 @@ pub fn load_builtin_models() -> Result<Vec<ModelConfig>, BuiltinModelCatalogErro
         .into_iter()
         .map(RawBuiltinModelConfig::into_model)
         .collect())
+}
+
+/// Returns the shared fallback base instructions used when a model has no catalog entry.
+pub fn default_base_instructions() -> &'static str {
+    DEFAULT_BASE_INSTRUCTIONS
 }
 
 /// Errors produced while loading the builtin catalog.
@@ -178,7 +185,7 @@ where
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{load_builtin_models, BuiltinModelCatalog};
+    use super::{default_base_instructions, load_builtin_models, BuiltinModelCatalog};
     use crate::ModelCatalog;
 
     #[test]
@@ -194,5 +201,10 @@ mod tests {
         let catalog = BuiltinModelCatalog::load().expect("load catalog");
         let model = catalog.resolve_for_turn(None).expect("resolve default");
         assert!(!model.slug.is_empty());
+    }
+
+    #[test]
+    fn default_base_instructions_are_available() {
+        assert!(!default_base_instructions().trim().is_empty());
     }
 }
