@@ -8,10 +8,14 @@ pub(crate) struct SlashCommandSpec {
 }
 
 /// Canonical slash commands supported by the interactive TUI.
-pub(crate) const SLASH_COMMANDS: [SlashCommandSpec; 6] = [
+pub(crate) const SLASH_COMMANDS: [SlashCommandSpec; 7] = [
     SlashCommandSpec {
         name: "/model",
         description: "Show or change the active model",
+    },
+    SlashCommandSpec {
+        name: "/onboard",
+        description: "Run the onboarding flow again",
     },
     SlashCommandSpec {
         name: "/new",

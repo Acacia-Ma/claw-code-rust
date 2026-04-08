@@ -79,6 +79,16 @@ pub(crate) enum WorkerEvent {
         /// Total output tokens accumulated in the session.
         total_output_tokens: usize,
     },
+    /// Provider validation succeeded during onboarding.
+    ProviderValidationSucceeded {
+        /// Short human-readable confirmation from the probe request.
+        reply_preview: String,
+    },
+    /// Provider validation failed during onboarding.
+    ProviderValidationFailed {
+        /// Human-readable failure reason from the probe request.
+        message: String,
+    },
     /// Current known sessions were listed from the server.
     SessionsListed {
         /// Structured sessions rendered into the bottom picker panel.

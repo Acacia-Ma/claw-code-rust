@@ -109,6 +109,8 @@ pub(crate) struct TuiApp {
     onboarding_api_key_pending: bool,
     /// Model selected during onboarding before credentials are finalized.
     onboarding_selected_model: Option<String>,
+    /// Whether the selected onboarding model came from manual entry.
+    onboarding_selected_model_is_custom: bool,
     /// Base URL entered during onboarding before it is applied.
     onboarding_selected_base_url: Option<String>,
     /// API key entered during onboarding before it is applied.
@@ -179,6 +181,7 @@ impl TuiApp {
             onboarding_base_url_pending: false,
             onboarding_api_key_pending: false,
             onboarding_selected_model: None,
+            onboarding_selected_model_is_custom: false,
             onboarding_selected_base_url: None,
             onboarding_selected_api_key: None,
             aux_panel_selection: 0,
@@ -189,7 +192,7 @@ impl TuiApp {
 
         if app.show_model_onboarding {
             app.show_model_panel();
-            app.onboarding_prompt = Some("Choose a builtin model to start".to_string());
+            app.onboarding_prompt = None;
             app.status_message.clear();
         }
 
@@ -390,6 +393,7 @@ impl TuiApp {
                     self.status_message = "Failed to submit prompt".to_string();
                 }
             }
+            KeyCode::Backspace if self.has_selectable_aux_panel() && self.input.is_blank() => {}
             KeyCode::Backspace => {
                 self.flush_pending_paste_burst(true);
                 self.input.backspace();
@@ -397,6 +401,7 @@ impl TuiApp {
                 self.aux_panel = None;
                 self.aux_panel_selection = 0;
             }
+            KeyCode::Delete if self.has_selectable_aux_panel() && self.input.is_blank() => {}
             KeyCode::Delete => {
                 self.flush_pending_paste_burst(true);
                 self.input.delete();
@@ -468,11 +473,26 @@ impl TuiApp {
             }
             KeyCode::Esc => {
                 self.flush_pending_paste_burst(true);
-                self.input.clear();
-                self.reset_slash_selection();
-                self.aux_panel = None;
-                self.aux_panel_selection = 0;
+                if !self.handle_escape() {
+                    self.input.clear();
+                    self.reset_slash_selection();
+                    self.aux_panel = None;
+                    self.aux_panel_selection = 0;
+                }
             }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.is_onboarding_model_picker_open()
+                    && self.input.is_blank() =>
+            {
+                if matches!(ch, 'c' | 'C') {
+                    self.begin_custom_model_onboarding();
+                }
+            }
+            KeyCode::Char(_ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.has_selectable_aux_panel()
+                    && self.input.is_blank() => {}
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if self.paste_burst.push_char(ch, Instant::now()) {
                     return;
@@ -543,6 +563,7 @@ impl TuiApp {
 
             self.onboarding_custom_model_pending = false;
             self.onboarding_selected_model = Some(model.to_string());
+            self.onboarding_selected_model_is_custom = true;
             self.onboarding_base_url_pending = true;
             self.aux_panel = None;
             self.aux_panel_selection = 0;
@@ -554,6 +575,13 @@ impl TuiApp {
 
         if self.onboarding_base_url_pending {
             let base_url = prompt.trim();
+            if !base_url.is_empty()
+                && !(base_url.starts_with("http://") || base_url.starts_with("https://"))
+            {
+                self.status_message = "Base URL must start with http:// or https://".to_string();
+                self.onboarding_prompt = Some("base url".to_string());
+                return Ok(());
+            }
             self.onboarding_base_url_pending = false;
             self.onboarding_api_key_pending = true;
             self.onboarding_selected_base_url = if base_url.is_empty() {
@@ -584,11 +612,12 @@ impl TuiApp {
         }
 
         if self.onboarding_api_key_pending {
+            let api_key = prompt.trim();
             self.onboarding_api_key_pending = false;
-            self.onboarding_selected_api_key = if prompt.trim().is_empty() {
+            self.onboarding_selected_api_key = if api_key.is_empty() {
                 None
             } else {
-                Some(prompt.trim().to_string())
+                Some(api_key.to_string())
             };
             self.onboarding_prompt_history.push(format!(
                 "api key> {}",
@@ -597,8 +626,16 @@ impl TuiApp {
                     .map(mask_secret)
                     .unwrap_or_else(String::new)
             ));
-            self.push_item(TranscriptItemKind::System, "Onboarding", "ok");
-            self.finish_onboarding_selection()?;
+            let Some(model) = self.onboarding_selected_model.clone() else {
+                anyhow::bail!("onboarding model selection was lost before validation");
+            };
+            self.busy = true;
+            self.status_message = "Validating provider connection".to_string();
+            self.worker.validate_provider(
+                model,
+                self.onboarding_selected_base_url.clone(),
+                self.onboarding_selected_api_key.clone(),
+            )?;
             return Ok(());
         }
 
@@ -654,7 +691,7 @@ impl TuiApp {
             .unwrap_or(0);
         self.aux_panel = Some(AuxPanel {
             title: if self.show_model_onboarding {
-                "Built-in models".to_string()
+                String::new()
             } else {
                 "Models".to_string()
             },
@@ -761,6 +798,10 @@ impl TuiApp {
                     ),
                 );
                 self.status_message = "Session status shown".to_string();
+                Ok(())
+            }
+            "/onboard" => {
+                self.start_onboarding();
                 Ok(())
             }
             "/sessions" => {
@@ -947,7 +988,37 @@ impl TuiApp {
                 self.total_output_tokens = total_output_tokens;
                 self.last_ctrl_c_at = None;
                 self.push_item(TranscriptItemKind::Error, "Error", message);
-                self.status_message = "Query failed".to_string();
+                self.status_message = "Query failed; see error above".to_string();
+            }
+            WorkerEvent::ProviderValidationSucceeded { reply_preview } => {
+                self.busy = false;
+                self.push_item(
+                    TranscriptItemKind::System,
+                    "Onboarding",
+                    format!("Validation reply: {reply_preview}"),
+                );
+                if let Err(error) = self.finish_onboarding_selection() {
+                    self.push_item(
+                        TranscriptItemKind::Error,
+                        "Onboarding failed",
+                        error.to_string(),
+                    );
+                    self.status_message = "Failed to save onboarding settings".to_string();
+                    self.onboarding_api_key_pending = true;
+                    self.onboarding_prompt = Some("api key".to_string());
+                }
+            }
+            WorkerEvent::ProviderValidationFailed { message } => {
+                self.busy = false;
+                self.push_item(
+                    TranscriptItemKind::Error,
+                    "Validation failed",
+                    message.clone(),
+                );
+                self.onboarding_api_key_pending = true;
+                self.onboarding_prompt = Some("api key".to_string());
+                self.input.clear();
+                self.status_message = format!("Validation failed: {message}");
             }
             WorkerEvent::SessionsListed { sessions } => {
                 self.show_session_panel(sessions);
@@ -1107,6 +1178,100 @@ impl TuiApp {
         )
     }
 
+    fn is_onboarding_model_picker_open(&self) -> bool {
+        self.show_model_onboarding
+            && matches!(
+                self.aux_panel.as_ref().map(|panel| &panel.content),
+                Some(AuxPanelContent::ModelList(_))
+            )
+    }
+
+    fn begin_custom_model_onboarding(&mut self) {
+        self.aux_panel = None;
+        self.aux_panel_selection = 0;
+        self.onboarding_custom_model_pending = true;
+        self.onboarding_base_url_pending = false;
+        self.onboarding_api_key_pending = false;
+        self.onboarding_selected_model = None;
+        self.onboarding_selected_model_is_custom = true;
+        self.onboarding_selected_base_url = None;
+        self.onboarding_selected_api_key = None;
+        self.onboarding_prompt = Some("model name".to_string());
+        self.status_message.clear();
+        self.input.clear();
+    }
+
+    fn exit_onboarding(&mut self) {
+        self.show_model_onboarding = false;
+        self.aux_panel = None;
+        self.aux_panel_selection = 0;
+        self.onboarding_custom_model_pending = false;
+        self.onboarding_prompt = None;
+        self.onboarding_prompt_history.clear();
+        self.onboarding_base_url_pending = false;
+        self.onboarding_api_key_pending = false;
+        self.onboarding_selected_model = None;
+        self.onboarding_selected_model_is_custom = false;
+        self.onboarding_selected_base_url = None;
+        self.onboarding_selected_api_key = None;
+        self.input.clear();
+        self.status_message = "Onboarding dismissed".to_string();
+    }
+
+    fn start_onboarding(&mut self) {
+        self.show_model_onboarding = true;
+        self.aux_panel = None;
+        self.aux_panel_selection = 0;
+        self.onboarding_custom_model_pending = false;
+        self.onboarding_prompt = None;
+        self.onboarding_prompt_history.clear();
+        self.onboarding_base_url_pending = false;
+        self.onboarding_api_key_pending = false;
+        self.onboarding_selected_model = None;
+        self.onboarding_selected_model_is_custom = false;
+        self.onboarding_selected_base_url = None;
+        self.onboarding_selected_api_key = None;
+        self.input.clear();
+        self.show_model_panel();
+        self.status_message = "Onboarding started".to_string();
+    }
+
+    fn handle_escape(&mut self) -> bool {
+        if self.onboarding_api_key_pending {
+            self.onboarding_api_key_pending = false;
+            self.onboarding_prompt = Some("base url".to_string());
+            self.input.clear();
+            return true;
+        }
+        if self.onboarding_base_url_pending {
+            self.onboarding_base_url_pending = false;
+            self.onboarding_selected_base_url = None;
+            self.input.clear();
+            if self.onboarding_selected_model_is_custom {
+                self.onboarding_custom_model_pending = true;
+                self.onboarding_prompt = Some("model name".to_string());
+            } else {
+                self.onboarding_prompt = None;
+                self.show_model_panel();
+            }
+            return true;
+        }
+        if self.onboarding_custom_model_pending {
+            self.onboarding_custom_model_pending = false;
+            self.onboarding_selected_model = None;
+            self.onboarding_selected_model_is_custom = false;
+            self.onboarding_prompt = None;
+            self.input.clear();
+            self.show_model_panel();
+            return true;
+        }
+        if self.is_onboarding_model_picker_open() {
+            self.exit_onboarding();
+            return true;
+        }
+        false
+    }
+
     fn reset_slash_selection(&mut self) {
         self.slash_selection = 0;
     }
@@ -1188,23 +1353,14 @@ impl TuiApp {
                 }
                 let selected = models[self.aux_panel_selection.min(models.len() - 1)].clone();
                 if selected.is_custom_mode {
-                    self.aux_panel = None;
-                    self.aux_panel_selection = 0;
-                    self.onboarding_custom_model_pending = true;
-                    self.onboarding_base_url_pending = false;
-                    self.onboarding_api_key_pending = false;
-                    self.onboarding_selected_model = None;
-                    self.onboarding_selected_base_url = None;
-                    self.onboarding_selected_api_key = None;
-                    self.onboarding_prompt = Some("model name".to_string());
-                    self.status_message.clear();
-                    self.input.clear();
+                    self.begin_custom_model_onboarding();
                     return true;
                 }
                 let selected_slug = selected.slug.clone();
                 self.aux_panel = None;
                 self.aux_panel_selection = 0;
                 self.onboarding_custom_model_pending = false;
+                self.onboarding_selected_model_is_custom = false;
                 self.onboarding_base_url_pending = true;
                 self.onboarding_api_key_pending = false;
                 self.onboarding_selected_model = Some(selected_slug.clone());
@@ -1239,6 +1395,7 @@ impl TuiApp {
         self.aux_panel = None;
         self.aux_panel_selection = 0;
         self.onboarding_custom_model_pending = false;
+        self.onboarding_selected_model_is_custom = false;
         self.onboarding_prompt = None;
         self.onboarding_prompt_history.clear();
         self.onboarding_base_url_pending = false;
@@ -1316,6 +1473,7 @@ mod tests {
             onboarding_base_url_pending: false,
             onboarding_api_key_pending: false,
             onboarding_selected_model: None,
+            onboarding_selected_model_is_custom: false,
             onboarding_selected_base_url: None,
             onboarding_selected_api_key: None,
             aux_panel: None,
@@ -1435,6 +1593,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slash_onboard_starts_onboarding_flow() {
+        let mut app = test_app();
+
+        app.handle_slash_command("/onboard".to_string())
+            .expect("onboard command should succeed");
+
+        assert!(app.show_model_onboarding);
+        assert!(app.is_onboarding_model_picker_open());
+        assert_eq!(app.status_message, "Onboarding started");
+    }
+
+    #[tokio::test]
     async fn slash_rename_requires_title() {
         let mut app = test_app();
 
@@ -1489,10 +1659,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slash_suggestions_include_onboard() {
+        let mut app = test_app();
+        app.input.replace("/o");
+
+        assert!(app
+            .slash_suggestions()
+            .iter()
+            .any(|suggestion| suggestion.name == "/onboard"));
+    }
+
+    #[tokio::test]
     async fn enter_executes_highlighted_slash_command() {
         let mut app = test_app();
         app.input.replace("/");
-        app.slash_selection = 5;
+        app.slash_selection = app
+            .slash_suggestions()
+            .iter()
+            .position(|suggestion| suggestion.name == "/exit")
+            .expect("exit suggestion should exist");
 
         app.handle_key(
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -1517,6 +1702,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn onboarding_model_panel_includes_custom_entry() {
+        let mut app = test_app();
+        app.show_model_onboarding = true;
+
+        app.show_model_panel();
+
+        assert!(app.aux_panel.as_ref().is_some_and(|panel| {
+            matches!(
+                &panel.content,
+                AuxPanelContent::ModelList(entries)
+                    if entries.iter().any(|entry| entry.is_custom_mode)
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn onboarding_model_picker_ignores_plain_typing() {
+        let mut app = test_app();
+        app.show_model_onboarding = true;
+        app.show_model_panel();
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            Rect::default(),
+        );
+
+        assert!(app.input.is_blank());
+        assert!(app.has_selectable_aux_panel());
+    }
+
+    #[tokio::test]
+    async fn onboarding_model_picker_allows_custom_shortcut() {
+        let mut app = test_app();
+        app.show_model_onboarding = true;
+        app.show_model_panel();
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+            Rect::default(),
+        );
+
+        assert!(app.onboarding_custom_model_pending);
+        assert_eq!(app.onboarding_prompt.as_deref(), Some("model name"));
+        assert!(app.aux_panel.is_none());
+    }
+
+    #[tokio::test]
+    async fn onboarding_rejects_base_url_without_http_scheme() {
+        let mut app = test_app();
+        app.onboarding_base_url_pending = true;
+        app.onboarding_selected_model = Some("test-model".to_string());
+
+        app.handle_submission("localhost:11434".to_string())
+            .expect("submission should not crash");
+
+        assert!(app.onboarding_base_url_pending);
+        assert_eq!(app.onboarding_prompt.as_deref(), Some("base url"));
+        assert_eq!(
+            app.status_message,
+            "Base URL must start with http:// or https://"
+        );
+    }
+
+    #[tokio::test]
+    async fn onboarding_escape_steps_back_to_model_list() {
+        let mut app = test_app();
+        app.show_model_onboarding = true;
+        app.begin_custom_model_onboarding();
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            Rect::default(),
+        );
+
+        assert!(app.is_onboarding_model_picker_open());
+        assert!(app.onboarding_prompt.is_none());
+        assert!(!app.onboarding_custom_model_pending);
+    }
+
+    #[tokio::test]
+    async fn onboarding_escape_from_root_dismisses_onboarding() {
+        let mut app = test_app();
+        app.show_model_onboarding = true;
+        app.show_model_panel();
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            Rect::default(),
+        );
+
+        assert!(!app.show_model_onboarding);
+        assert!(app.aux_panel.is_none());
+        assert_eq!(app.status_message, "Onboarding dismissed");
+    }
+
+    #[tokio::test]
     async fn session_new_command_updates_status() {
         let mut app = test_app();
 
@@ -1528,6 +1809,45 @@ mod tests {
             "New session ready; send a prompt to start it"
         );
         assert_eq!(app.aux_panel, None);
+    }
+
+    #[tokio::test]
+    async fn provider_validation_failure_returns_to_api_key_step() {
+        let mut app = test_app();
+        app.busy = true;
+        app.onboarding_selected_model = Some("test-model".to_string());
+
+        app.handle_worker_event(WorkerEvent::ProviderValidationFailed {
+            message: "connection refused".to_string(),
+        });
+
+        assert!(!app.busy);
+        assert!(app.onboarding_api_key_pending);
+        assert_eq!(app.onboarding_prompt.as_deref(), Some("api key"));
+        assert!(app.status_message.contains("connection refused"));
+    }
+
+    #[tokio::test]
+    async fn turn_failed_uses_specific_error_status_message() {
+        let mut app = test_app();
+        app.busy = true;
+
+        app.handle_worker_event(WorkerEvent::TurnFailed {
+            message: "anthropic provider requires an API key".to_string(),
+            turn_count: 3,
+            total_input_tokens: 10,
+            total_output_tokens: 20,
+        });
+
+        assert_eq!(
+            app.transcript.last(),
+            Some(&TranscriptItem::new(
+                TranscriptItemKind::Error,
+                "Error",
+                "anthropic provider requires an API key"
+            ))
+        );
+        assert_eq!(app.status_message, "Query failed; see error above");
     }
 
     #[tokio::test]

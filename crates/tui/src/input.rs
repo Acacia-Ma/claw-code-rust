@@ -127,11 +127,6 @@ impl InputBuffer {
         self.layout_with_prompt(full_width, prompt).lines
     }
 
-    /// Returns the number of visual lines needed to render the composer.
-    pub(crate) fn visual_line_count(&self, full_width: u16) -> u16 {
-        self.layout(full_width).lines.len() as u16
-    }
-
     fn char_len(&self) -> usize {
         self.text.chars().count()
     }
@@ -256,7 +251,7 @@ mod tests {
 
         assert_eq!(buffer.rendered_lines(4), vec!["> ab", "cdef", ""]);
         assert_eq!(buffer.visual_cursor(4), (0, 2));
-        assert_eq!(buffer.visual_line_count(4), 3);
+        assert_eq!(buffer.rendered_lines(4).len(), 3);
     }
 
     #[test]
@@ -266,7 +261,7 @@ mod tests {
 
         assert_eq!(buffer.rendered_lines(10), vec!["> a", "  bc"]);
         assert_eq!(buffer.visual_cursor(10), (4, 1));
-        assert_eq!(buffer.visual_line_count(10), 2);
+        assert_eq!(buffer.rendered_lines(10).len(), 2);
     }
 
     #[test]
