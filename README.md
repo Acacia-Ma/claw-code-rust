@@ -25,30 +25,17 @@
   />
 </div>
 
+</div>
+
 ---
 
 ## 📖 Table of Contents
 
-- [What is This](#-what-is-this)
 - [Quick Start](#-quick-start)
 - [Design Goals](#-design-goals)
 - [Contributing](#-contributing)
 - [References](#-references)
 - [License](#-license)
-
-## 💡 What is This
-
-This project extracts the core runtime ideas from [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and reorganizes them into a set of reusable Rust crates.
-
-Think of it as an **agent runtime skeleton**:
-
-| Layer | Role |
-|-------|------|
-| **Top** | A thin CLI that assembles all crates |
-| **Middle** | Core runtime: message loop, tool orchestration, permissions, tasks, model abstraction |
-| **Bottom** | Concrete implementations: built-in tools, MCP client, context management |
-
-> If the boundaries are clean enough, this can serve not only Claude-style coding agents, but any agent system that needs a solid runtime foundation.
 
 ## 🚀 Quick Start
 
@@ -57,8 +44,6 @@ Think of it as an **agent runtime skeleton**:
 No stable release yet — you can build the project from source using the instructions below.
 
 ### Build
-
-Make sure you have Rust installed, 1.75+ recommended (via https://rustup.rs/).
 
 ```bash
 git clone https://github.com/claw-cli/claw-code-rust && cd claw-code-rust
@@ -70,6 +55,22 @@ cargo build --release
 # windows
 .\target\release\clawcr onboard
 ```
+
+> [!TIP]
+> Make sure you have Rust installed, 1.75+ recommended (via https://rustup.rs/).
+
+## FAQ
+
+### How is this different from Claude Code?
+
+It's very similar to Claude Code in terms of capability. Here are the key differences:
+
+- 100% open source
+- Not coupled to any provider. ClawCR can be used with Claude, OpenAI, z.ai, Qwen, Deepseek, or even local models. As models evolve, the gaps between them will close and pricing will drop, so being provider-agnostic is important.
+- Out-of-the-box LSP support
+- TUI support is already implemented.
+- Built with a client/server architecture. For example, the core can run locally on your machine while being controlled remotely (e.g., from a mobile app), with the TUI acting as just one of many possible clients.
+
 
 ## 🤝 Contributing
 
