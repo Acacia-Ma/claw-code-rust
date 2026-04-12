@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// OpenAI chat-completion provider backed by the official HTTP API.
-/// https://developers.openai.com/api/reference/chat-completions/overview
+/// <https://developers.openai.com/api/reference/chat-completions/overview>
 /// Works with OpenAI chat-completion servers by changing the base URL.
 pub struct OpenAIProvider {
     client: Client,
