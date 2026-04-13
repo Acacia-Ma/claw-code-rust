@@ -184,7 +184,6 @@ impl Default for InputModality {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 /// Static metadata and capability flags for one model in the catalog.
@@ -219,7 +218,10 @@ pub struct ModelPreset {
     /// Percentage of the context window treated as effectively usable.
     pub effective_context_window_percent: Option<u8>,
     /// Policy used when truncating content for requests.
-    #[serde(default, deserialize_with = "crate::truncation::deserialize_truncation_policy_config")]
+    #[serde(
+        default,
+        deserialize_with = "crate::truncation::deserialize_truncation_policy_config"
+    )]
     pub truncation_policy: TruncationPolicyConfig,
     /// Input types accepted by the model.
     #[serde(default = "default_input_modalities")]
@@ -366,7 +368,9 @@ where
     let value = serde_json::Value::deserialize(deserializer)?;
     match value {
         serde_json::Value::Null => Ok(default_thinking_capability()),
-        serde_json::Value::String(text) if text.trim().is_empty() => Ok(default_thinking_capability()),
+        serde_json::Value::String(text) if text.trim().is_empty() => {
+            Ok(default_thinking_capability())
+        }
         other => serde_json::from_value(other).map_err(serde::de::Error::custom),
     }
 }

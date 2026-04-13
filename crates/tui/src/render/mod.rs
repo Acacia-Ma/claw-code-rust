@@ -22,7 +22,7 @@ use crate::{
     events::{ModelListEntry, ThinkingListEntry},
     slash::SlashCommandSpec,
 };
-use clawcr_core::{PresetModelCatalog, ModelCatalog};
+use clawcr_core::{ModelCatalog, PresetModelCatalog};
 use textwrap::{Options, wrap};
 use unicode_width::UnicodeWidthStr;
 

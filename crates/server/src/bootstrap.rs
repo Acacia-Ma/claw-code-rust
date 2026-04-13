@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
-use clawcr_core::{AppConfigLoader, PresetModelCatalog, FileSystemAppConfigLoader, ModelCatalog};
+use clawcr_core::{AppConfigLoader, FileSystemAppConfigLoader, ModelCatalog, PresetModelCatalog};
 use clawcr_tools::ToolRegistry;
 use clawcr_utils::FileSystemConfigPathResolver;
 

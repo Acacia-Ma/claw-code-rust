@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use clawcr_core::{PresetModelCatalog, ModelPreset, SessionId};
+use clawcr_core::{ModelPreset, PresetModelCatalog, SessionId};
 use clawcr_provider::ProviderFamily;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pretty_assertions::assert_eq;
@@ -35,7 +35,13 @@ fn test_app() -> TuiApp {
         pending_status_index: None,
         pending_assistant_index: None,
         worker: QueryWorkerHandle::stub(),
-        model_catalog: PresetModelCatalog::new(vec![]),
+        model_catalog: PresetModelCatalog::new(vec![ModelPreset {
+            slug: "test-model".to_string(),
+            display_name: "Test Model".to_string(),
+            provider_family: ProviderFamily::Anthropic,
+            thinking_capability: clawcr_core::ThinkingCapability::Toggle,
+            ..ModelPreset::default()
+        }]),
         saved_models: vec![],
         show_model_onboarding: false,
         onboarding_announced: false,
