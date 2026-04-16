@@ -1037,7 +1037,7 @@ impl ModelProviderSDK for OpenAIProvider {
 #[async_trait]
 impl ProviderAdapter for OpenAIProvider {
     fn family(&self) -> ProviderFamily {
-        ProviderFamily::OpenAI
+        ProviderFamily::openai()
     }
 
     fn capabilities(&self, model: &str) -> ProviderCapabilities {
@@ -1185,6 +1185,33 @@ mod tests {
         assert_eq!(body["temperature"], json!(0.3));
         assert_eq!(body["top_p"], json!(0.9));
         assert_eq!(body["top_k"], json!(40));
+    }
+
+    #[test]
+    fn debug_request_body_preserves_top_p_precision() {
+        let request = ModelRequest {
+            model: "glm-5.1".to_string(),
+            system: None,
+            messages: vec![RequestMessage {
+                role: "user".to_string(),
+                content: vec![RequestContent::Text {
+                    text: "Reply with OK only.".to_string(),
+                }],
+            }],
+            max_tokens: 8192,
+            tools: None,
+            sampling: SamplingControls {
+                temperature: Some(1.0),
+                top_p: Some(0.95),
+                top_k: None,
+            },
+            thinking: Some("enabled".to_string()),
+            extra_body: None,
+        };
+
+        let body = build_request(&request, true);
+
+        assert_eq!(body["top_p"], json!(0.95));
     }
 
     #[test]

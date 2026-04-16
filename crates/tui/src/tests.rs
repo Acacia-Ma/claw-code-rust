@@ -19,7 +19,7 @@ use crate::{
 fn test_app() -> TuiApp {
     TuiApp {
         model: "test-model".to_string(),
-        provider: ProviderFamily::Anthropic,
+        provider: ProviderFamily::anthropic(),
         cwd: PathBuf::from("."),
         transcript: Vec::new(),
         input: InputBuffer::new(),
@@ -34,11 +34,12 @@ fn test_app() -> TuiApp {
         slash_selection: 0,
         pending_status_index: None,
         pending_assistant_index: None,
+        pending_reasoning_index: None,
         worker: QueryWorkerHandle::stub(),
         model_catalog: PresetModelCatalog::new(vec![Model {
             slug: "test-model".to_string(),
             display_name: "Test Model".to_string(),
-            provider_family: ProviderFamily::Anthropic,
+            provider: ProviderFamily::anthropic(),
             thinking_capability: clawcr_core::ThinkingCapability::Toggle,
             ..Model::default()
         }]),
@@ -86,6 +87,29 @@ async fn assistant_text_deltas_append_to_same_item() {
     assert_eq!(app.transcript.len(), 1);
     assert_eq!(app.transcript[0].kind, TranscriptItemKind::Assistant);
     assert_eq!(app.transcript[0].body, "hello");
+}
+
+#[tokio::test]
+async fn reasoning_deltas_append_to_reasoning_item() {
+    let mut app = test_app();
+    app.handle_worker_event(WorkerEvent::ReasoningDelta("plan ".to_string()));
+    app.handle_worker_event(WorkerEvent::ReasoningDelta("first".to_string()));
+
+    assert_eq!(app.transcript.len(), 1);
+    assert_eq!(app.transcript[0].kind, TranscriptItemKind::Reasoning);
+    assert_eq!(app.transcript[0].body, "plan first");
+}
+
+#[tokio::test]
+async fn completed_assistant_message_restores_final_text() {
+    let mut app = test_app();
+    app.handle_worker_event(WorkerEvent::AssistantMessageCompleted(
+        "final response".to_string(),
+    ));
+
+    assert_eq!(app.transcript.len(), 1);
+    assert_eq!(app.transcript[0].kind, TranscriptItemKind::Assistant);
+    assert_eq!(app.transcript[0].body, "final response");
 }
 
 #[tokio::test]
@@ -655,14 +679,14 @@ async fn onboarding_model_picker_enter_on_builtin_row_prompts_for_connection() {
     app.show_model_onboarding = true;
     app.saved_models = vec![SavedModelEntry {
         model: "existing-model".to_string(),
-        provider: ProviderFamily::Anthropic,
+        provider: ProviderFamily::anthropic(),
         base_url: Some("https://example.invalid/v1".to_string()),
         api_key: Some("secret".to_string()),
     }];
     app.model_catalog = PresetModelCatalog::new(vec![Model {
         slug: "new-anthropic-model".to_string(),
         display_name: "New Anthropic Model".to_string(),
-        provider_family: ProviderFamily::Anthropic,
+        provider: ProviderFamily::anthropic(),
         description: Some("test model".to_string()),
         ..Model::default()
     }]);
