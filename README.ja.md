@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦀 Claw CR
+# 🦀 Devo
 
 **Rust で構築された、オープンソースのコーディングエージェント。Claude Code の代替です。**
 
@@ -47,10 +47,10 @@ git clone https://github.com/claw-cli/claw-code-rust && cd claw-code-rust
 cargo build --release
 
 # linux / macos
-./target/release/clawcr onboard
+./target/release/devo onboard
 
 # windows
-.\target\release\clawcr onboard
+.\target\release\devo onboard
 ```
 
 > [!TIP]
@@ -63,7 +63,7 @@ cargo build --release
 機能面では Claude Code と非常に近いです。主な違いは次のとおりです。
 
 - 100% オープンソース
-- 特定のプロバイダーに依存しません。ClawCR は Claude、OpenAI、z.ai、Qwen、Deepseek、あるいはローカルモデルでも利用できます。モデルが進化するにつれて差は縮まり、価格も下がっていくため、プロバイダー非依存であることは重要です。
+- 特定のプロバイダーに依存しません。Devo は Claude、OpenAI、z.ai、Qwen、Deepseek、あるいはローカルモデルでも利用できます。モデルが進化するにつれて差は縮まり、価格も下がっていくため、プロバイダー非依存であることは重要です。
 - LSP を最初からサポート
 - TUI のサポートはすでに実装済み
 - クライアント/サーバー型アーキテクチャで構築されています。たとえば、core はローカルマシンで動かしつつ、モバイルアプリなどからリモート制御でき、TUI は複数あるクライアントの1つにすぎません。

@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦀 Claw CR
+# 🦀 Devo
 
 **Open-source coding agent на Rust. Альтернатива ClaudeCode**
 
@@ -48,10 +48,10 @@ git clone https://github.com/claw-cli/claw-code-rust && cd claw-code-rust
 cargo build --release
 
 # linux / macos
-./target/release/clawcr onboard
+./target/release/devo onboard
 
 # windows
-.\target\release\clawcr onboard
+.\target\release\devo onboard
 ```
 
 > [!TIP]
@@ -64,7 +64,7 @@ cargo build --release
 По возможностям проект очень похож на Claude Code. Основные отличия:
 
 - 100% open source
-- Не привязан к одному провайдеру. ClawCR можно использовать с Claude, OpenAI, z.ai, Qwen, Deepseek или даже с локальными моделями. По мере развития моделей разрыв между ними будет сокращаться, а стоимость снижаться, поэтому независимость от провайдера важна.
+- Не привязан к одному провайдеру. Devo можно использовать с Claude, OpenAI, z.ai, Qwen, Deepseek или даже с локальными моделями. По мере развития моделей разрыв между ними будет сокращаться, а стоимость снижаться, поэтому независимость от провайдера важна.
 - LSP поддерживается из коробки
 - TUI уже реализован
 - Построен на клиент-серверной архитектуре. Например, core может работать локально на вашем компьютере и при этом управляться удалённо, например из мобильного приложения, а TUI будет лишь одним из возможных клиентов

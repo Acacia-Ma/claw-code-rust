@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦀 Claw CR
+# 🦀 Devo
 
 **Rust ile inşa edilmiş, açık kaynak kodlama ajanı. Claude Code'a bir alternatif**
 
@@ -48,10 +48,10 @@ git clone https://github.com/claw-cli/claw-code-rust && cd claw-code-rust
 cargo build --release
 
 # linux / macos
-./target/release/clawcr onboard
+./target/release/devo onboard
 
 # windows
-.\target\release\clawcr onboard
+.\target\release\devo onboard
 ```
 
 > [!TIP]
@@ -64,7 +64,7 @@ cargo build --release
 Yetenek açısından Claude Code'a çok benzer. Başlıca farklar şunlardır:
 
 - %100 açık kaynak
-- Tek bir sağlayıcıya bağlı değildir. ClawCR; Claude, OpenAI, z.ai, Qwen, Deepseek veya yerel modellerle kullanılabilir. Modeller geliştikçe aradaki fark kapanacak ve fiyatlar düşecektir, bu yüzden sağlayıcıdan bağımsız olmak önemlidir.
+- Tek bir sağlayıcıya bağlı değildir. Devo; Claude, OpenAI, z.ai, Qwen, Deepseek veya yerel modellerle kullanılabilir. Modeller geliştikçe aradaki fark kapanacak ve fiyatlar düşecektir, bu yüzden sağlayıcıdan bağımsız olmak önemlidir.
 - Hazır LSP desteği
 - TUI desteği zaten uygulanmış durumda
 - İstemci/sunucu mimarisiyle inşa edilmiştir. Örneğin core, makinenizde yerel olarak çalışırken uzaktan kontrol edilebilir; TUI ise mümkün olan istemcilerden yalnızca biridir

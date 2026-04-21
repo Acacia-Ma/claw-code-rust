@@ -3,7 +3,7 @@
 ## Rust
 
 This repository is a Rust-based coding agent, currently called `claw-code-rust`.
-- All crate names use the `clawcr-` prefix. For instance, the crate in the `core` directory is named `clawcr-core`.
+- All crate names use the `devo-` prefix. For instance, the crate in the `core` directory is named `devo-core`.
 - When using `format!`, inline variables directly inside `{}` whenever possible.
 - Always collapse nested `if` statements according to https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
 - Inline `format!` arguments whenever possible, following https://rust-lang.github.io/rust-clippy/master/index.html#uninlined_format_args

@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦀 Claw CR
+# 🦀 Devo
 
 **用 Rust 构建的开源编程代理。Claude Code 的替代方案。**
 
@@ -46,10 +46,10 @@ git clone https://github.com/claw-cli/claw-code-rust && cd claw-code-rust
 cargo build --release
 
 # linux / macos
-./target/release/clawcr onboard
+./target/release/devo onboard
 
 # windows
-.\target\release\clawcr onboard
+.\target\release\devo onboard
 ```
 
 > [!TIP]
@@ -62,7 +62,7 @@ cargo build --release
 在能力上，它和 Claude Code 非常接近。主要区别如下：
 
 - 100% 开源
-- 不绑定任何特定提供方。ClawCR 可以配合 Claude、OpenAI、z.ai、Qwen、Deepseek，甚至本地模型使用。随着模型不断演进，差距会缩小，价格也会下降，因此保持 provider 无关性很重要。
+- 不绑定任何特定提供方。Devo 可以配合 Claude、OpenAI、z.ai、Qwen、Deepseek，甚至本地模型使用。随着模型不断演进，差距会缩小，价格也会下降，因此保持 provider 无关性很重要。
 - 开箱即用的 LSP 支持
 - TUI 支持已经实现
 - 采用 client/server 架构。例如，core 可以在本机运行，同时由远程控制，比如从移动端应用控制，而 TUI 只是众多 client 之一。
