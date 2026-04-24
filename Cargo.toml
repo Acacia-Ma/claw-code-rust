@@ -72,7 +72,7 @@ ratatui = "0.29.0"
 ratatui-macros = "0.6.0"
 regex = "1"
 regex-lite = "0.1.8"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 reqwest-eventsource = "0.6"
 schemars = "0.8.22"
 serde = { version = "1", features = ["derive"] }

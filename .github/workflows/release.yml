@@ -47,9 +47,7 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
-      # Cross-compiling aarch64-unknown-linux-gnu needs a gcc cross-toolchain.
-      # openssl-sys is pulled in via reqwest -> native-tls.
-      # We build with vendored openssl to avoid needing arm64 system libraries.
+      # Cross-compiling aarch64-unknown-linux-gnu needs an explicit gcc cross-toolchain.
       - name: Install cross-compilation toolchain (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -62,18 +60,15 @@ jobs:
         run: |
           echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
           echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> "$GITHUB_ENV"
-          echo "CARGO_FEATURE_VENDORED_OPENSSL=1" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build release binary (x86_64 Linux)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: cargo build --release --target ${{ matrix.target }} -p devo-cli
 
-      - name: Build release binary (Linux ARM64, vendored openssl)
+      - name: Build release binary (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          # Build a dummy build script to prime cached dependencies with the host target first,
-          # then cross-compile. This avoids recompiling the whole dep graph for the cross target.
-          OPENSSL_NO_PKG_CONFIG=1 cargo build --release --target ${{ matrix.target }} -p devo-cli
+        run: cargo build --release --target ${{ matrix.target }} -p devo-cli
 
       - name: Build release binary (macOS)
         if: runner.os == 'macOS'
