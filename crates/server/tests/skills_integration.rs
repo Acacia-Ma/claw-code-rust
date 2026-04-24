@@ -1,10 +1,11 @@
-use std::{
-    path::{Path, PathBuf},
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::path::Path;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
+use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream;
 use pretty_assertions::assert_eq;
@@ -12,20 +13,34 @@ use serde_json::json;
 use tempfile::TempDir;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, timeout};
+use tokio::time::Duration;
+use tokio::time::timeout;
 
-use devo_core::{FileSystemSkillCatalog, PresetModelCatalog, SkillsConfig};
-use devo_protocol::{
-    ModelRequest, ModelResponse, RequestContent, ResponseContent, ResponseMetadata, StopReason,
-    StreamEvent, Usage,
-};
+use devo_core::FileSystemSkillCatalog;
+use devo_core::PresetModelCatalog;
+use devo_core::SkillsConfig;
+use devo_protocol::ModelRequest;
+use devo_protocol::ModelResponse;
+use devo_protocol::RequestContent;
+use devo_protocol::ResponseContent;
+use devo_protocol::ResponseMetadata;
+use devo_protocol::StopReason;
+use devo_protocol::StreamEvent;
+use devo_protocol::Usage;
 use devo_provider::ModelProviderSDK;
-use devo_server::{
-    ClientTransportKind, ErrorResponse, ProtocolErrorCode, ServerRuntime,
-    ServerRuntimeDependencies, SkillChangedResult, SkillListResult, SkillRecord, SkillSource,
-    SuccessResponse,
-};
-use devo_tools::{Tool, ToolOutput, ToolRegistry};
+use devo_server::ClientTransportKind;
+use devo_server::ErrorResponse;
+use devo_server::ProtocolErrorCode;
+use devo_server::ServerRuntime;
+use devo_server::ServerRuntimeDependencies;
+use devo_server::SkillChangedResult;
+use devo_server::SkillListResult;
+use devo_server::SkillRecord;
+use devo_server::SkillSource;
+use devo_server::SuccessResponse;
+use devo_tools::Tool;
+use devo_tools::ToolOutput;
+use devo_tools::ToolRegistry;
 
 #[derive(Default)]
 struct CapturingProvider {
@@ -233,6 +248,7 @@ fn all_user_request_texts(request: &ModelRequest) -> Vec<String> {
         .filter(|message| message.role == "user")
         .flat_map(|message| {
             message.content.iter().filter_map(|content| match content {
+                RequestContent::Reasoning { text } => Some(text.clone()),
                 RequestContent::Text { text } => Some(text.clone()),
                 RequestContent::ToolUse { .. } | RequestContent::ToolResult { .. } => None,
             })

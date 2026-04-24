@@ -119,6 +119,8 @@ impl Role {
 pub enum ContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
+    #[serde(rename = "reasoning")]
+    Reasoning { text: String },
     #[serde(rename = "tool_use")]
     ToolUse {
         id: String,
@@ -162,7 +164,9 @@ impl Message {
                 ContentBlock::ToolUse { id, name, input } => {
                     Some((id.as_str(), name.as_str(), input))
                 }
-                ContentBlock::Text { .. } | ContentBlock::ToolResult { .. } => None,
+                ContentBlock::Text { .. }
+                | ContentBlock::Reasoning { .. }
+                | ContentBlock::ToolResult { .. } => None,
             })
             .collect()
     }
@@ -173,6 +177,9 @@ impl Message {
             .iter()
             .map(|block| match block {
                 ContentBlock::Text { text } => RequestContent::Text { text: text.clone() },
+                ContentBlock::Reasoning { text } => {
+                    RequestContent::Reasoning { text: text.clone() }
+                }
                 ContentBlock::ToolUse { id, name, input } => RequestContent::ToolUse {
                     id: id.clone(),
                     name: name.clone(),

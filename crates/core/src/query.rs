@@ -733,6 +733,12 @@ pub async fn query(
         // Build assistant message
         let mut assistant_content: Vec<ContentBlock> = Vec::new();
 
+        if !reasoning_text.is_empty() {
+            assistant_content.push(ContentBlock::Reasoning {
+                text: reasoning_text,
+            });
+        }
+
         if !assistant_text.is_empty() {
             assistant_content.push(ContentBlock::Text {
                 text: assistant_text,
@@ -1445,9 +1451,14 @@ mod tests {
             assistant_message,
             &Message {
                 role: Role::Assistant,
-                content: vec![ContentBlock::Text {
-                    text: "final".into(),
-                }],
+                content: vec![
+                    ContentBlock::Reasoning {
+                        text: "plan".into(),
+                    },
+                    ContentBlock::Text {
+                        text: "final".into(),
+                    },
+                ],
             }
         );
     }

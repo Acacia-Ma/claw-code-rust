@@ -44,6 +44,9 @@ pub struct ModelPreset {
         deserialize_with = "deserialize_thinking_capability"
     )]
     pub thinking_capability: ThinkingCapability,
+    /// Legacy list of supported reasoning levels used by some bundled presets.
+    #[serde(default, alias = "supported_reasoning_levels")]
+    pub supported_reasoning_levels: Vec<ReasoningEffort>,
     /// Default reasoning effort selected for the model when no levels are exposed.
     #[serde(
         default = "default_reasoning_effort",
@@ -95,6 +98,7 @@ impl Default for ModelPreset {
             provider: ProviderWireApi::OpenAIChatCompletions,
             description: None,
             thinking_capability: ThinkingCapability::Unsupported,
+            supported_reasoning_levels: Vec::new(),
             default_reasoning_effort: Some(ReasoningEffort::default()),
             thinking_implementation: None,
             base_instructions: String::new(),
@@ -115,13 +119,30 @@ impl Default for ModelPreset {
 
 impl From<ModelPreset> for Model {
     fn from(value: ModelPreset) -> Self {
+        let thinking_capability = match value.thinking_capability {
+            ThinkingCapability::Toggle if !value.supported_reasoning_levels.is_empty() => {
+                ThinkingCapability::ToggleWithLevels(value.supported_reasoning_levels.clone())
+            }
+            capability => capability,
+        };
+        let default_reasoning_effort = if matches!(
+            thinking_capability,
+            ThinkingCapability::ToggleWithLevels(_)
+        ) {
+            value
+                .default_reasoning_effort
+                .or_else(|| value.supported_reasoning_levels.first().copied())
+        } else {
+            value.default_reasoning_effort
+        };
+
         Self {
             slug: value.slug,
             display_name: value.display_name,
             provider: value.provider,
             description: value.description,
-            thinking_capability: value.thinking_capability,
-            default_reasoning_effort: value.default_reasoning_effort,
+            thinking_capability,
+            default_reasoning_effort,
             thinking_implementation: value.thinking_implementation,
             base_instructions: value.base_instructions,
             context_window: value.context_window,

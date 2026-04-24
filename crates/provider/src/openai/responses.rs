@@ -136,6 +136,10 @@ fn build_input_message(role: OpenAIRole, content: &[RequestContent]) -> Value {
                 "type": "input_text",
                 "text": text,
             }),
+            RequestContent::Reasoning { text } => json!({
+                "type": "reasoning",
+                "text": text,
+            }),
             RequestContent::ToolUse { id, name, input } => json!({
                 "type": "tool_call",
                 "id": id,

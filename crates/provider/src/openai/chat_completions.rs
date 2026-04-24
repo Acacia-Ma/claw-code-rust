@@ -552,10 +552,12 @@ fn build_request(request: &ModelRequest, stream: bool) -> Value {
         match request_role(&message.role) {
             super::OpenAIRole::Assistant => {
                 let mut text_parts = Vec::new();
+                let mut reasoning_parts = Vec::new();
                 let mut tool_calls = Vec::new();
                 for block in &message.content {
                     match block {
                         RequestContent::Text { text } => text_parts.push(text.clone()),
+                        RequestContent::Reasoning { text } => reasoning_parts.push(text.clone()),
                         RequestContent::ToolUse { id, name, input } => tool_calls.push(json!({
                             "id": id,
                             "type": "function",
@@ -573,6 +575,9 @@ fn build_request(request: &ModelRequest, stream: bool) -> Value {
                 } else {
                     Value::String(text_parts.join(""))
                 };
+                if !reasoning_parts.is_empty() {
+                    entry["reasoning_content"] = Value::String(reasoning_parts.join(""));
+                }
                 if !tool_calls.is_empty() {
                     entry["tool_calls"] = Value::Array(tool_calls);
                 }
@@ -584,6 +589,7 @@ fn build_request(request: &ModelRequest, stream: bool) -> Value {
                         RequestContent::Text { text } => {
                             messages.push(json!({ "role": role, "content": text }));
                         }
+                        RequestContent::Reasoning { .. } => {}
                         RequestContent::ToolResult {
                             tool_use_id,
                             content,
@@ -1077,8 +1083,15 @@ impl ProviderAdapter for OpenAIProvider {
         let mut capabilities = ProviderCapabilities::openai();
         capabilities.supports_temperature = profile.supports_temperature;
         capabilities.supports_top_p = profile.supports_top_p;
+<<<<<<< Updated upstream
         capabilities.supports_reasoning_effort =
             matches!(profile.reasoning_mode, OpenAIReasoningMode::Effort);
+=======
+        capabilities.supports_reasoning_effort = matches!(
+            profile.reasoning_mode,
+            OpenAIReasoningMode::Effort | OpenAIReasoningMode::ThinkingWithEffort
+        );
+>>>>>>> Stashed changes
         capabilities.supports_top_k = profile.supports_top_k;
         capabilities.supports_reasoning_content = profile.supports_reasoning_content;
         capabilities.supported_roles = profile.supported_roles.to_vec();
@@ -1116,6 +1129,9 @@ mod tests {
                 RequestMessage {
                     role: "assistant".to_string(),
                     content: vec![
+                        RequestContent::Reasoning {
+                            text: "Need to inspect weather data first.".to_string(),
+                        },
                         RequestContent::Text {
                             text: "Calling tool".to_string(),
                         },
@@ -1162,6 +1178,10 @@ mod tests {
         assert_eq!(body["temperature"], json!(0.2));
         assert_eq!(body["tools"][0]["type"], json!("function"));
         assert_eq!(body["messages"][1]["role"], json!("assistant"));
+        assert_eq!(
+            body["messages"][1]["reasoning_content"],
+            json!("Need to inspect weather data first.")
+        );
         assert_eq!(
             body["messages"][1]["tool_calls"][0]["function"]["arguments"],
             json!("{\"city\":\"Boston\"}")

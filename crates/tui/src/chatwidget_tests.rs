@@ -134,6 +134,84 @@ fn initial_thinking_selection_overrides_model_default() {
 }
 
 #[test]
+fn toggle_with_levels_treats_enabled_as_default_effort_in_picker() {
+    let model = Model {
+        slug: "deepseek-v4".to_string(),
+        display_name: "Deepseek V4".to_string(),
+        thinking_capability: ThinkingCapability::ToggleWithLevels(vec![
+            ReasoningEffort::High,
+            ReasoningEffort::Max,
+        ]),
+        default_reasoning_effort: Some(ReasoningEffort::High),
+        ..Model::default()
+    };
+    let (widget, _app_event_rx) =
+        widget_with_model_and_thinking(model, PathBuf::from("."), Some("enabled".to_string()));
+
+    assert_eq!(
+        widget.thinking_entries(),
+        vec![
+            ThinkingListEntry {
+                is_current: false,
+                label: "Off".to_string(),
+                description: "Disable thinking for this turn".to_string(),
+                value: "disabled".to_string(),
+            },
+            ThinkingListEntry {
+                is_current: true,
+                label: "High".to_string(),
+                description: "More deliberate for harder tasks".to_string(),
+                value: "high".to_string(),
+            },
+            ThinkingListEntry {
+                is_current: false,
+                label: "Max".to_string(),
+                description: "Most deliberate, highest effort".to_string(),
+                value: "max".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn thinking_entries_show_off_and_levels_for_toggle_models_with_supported_levels() {
+    let model = devo_core::ModelPreset {
+        slug: "deepseek-v4".to_string(),
+        display_name: "Deepseek V4".to_string(),
+        thinking_capability: ThinkingCapability::Toggle,
+        supported_reasoning_levels: vec![ReasoningEffort::High, ReasoningEffort::Max],
+        default_reasoning_effort: None,
+        ..devo_core::ModelPreset::default()
+    }
+    .into();
+    let (widget, _app_event_rx) = widget_with_model(model, PathBuf::from("."));
+
+    assert_eq!(
+        widget.thinking_entries(),
+        vec![
+            ThinkingListEntry {
+                is_current: false,
+                label: "Off".to_string(),
+                description: "Disable thinking for this turn".to_string(),
+                value: "disabled".to_string(),
+            },
+            ThinkingListEntry {
+                is_current: true,
+                label: "High".to_string(),
+                description: "More deliberate for harder tasks".to_string(),
+                value: "high".to_string(),
+            },
+            ThinkingListEntry {
+                is_current: false,
+                label: "Max".to_string(),
+                description: "Most deliberate, highest effort".to_string(),
+                value: "max".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn submit_text_emits_user_turn_with_model_and_thinking() {
     let cwd = std::env::current_dir().expect("current directory is available");
     let model = Model {

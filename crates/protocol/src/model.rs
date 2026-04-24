@@ -89,6 +89,9 @@ pub enum RequestContent {
     #[serde(rename = "text")]
     Text { text: String },
 
+    #[serde(rename = "reasoning")]
+    Reasoning { text: String },
+
     #[serde(rename = "tool_use")]
     ToolUse {
         id: String,
@@ -579,6 +582,38 @@ mod tests {
     }
 
     #[test]
+<<<<<<< Updated upstream
+=======
+    fn resolve_thinking_selection_supports_toggle_with_levels() {
+        let mut preset = model("deepseek-v4");
+        preset.thinking_capability =
+            ThinkingCapability::ToggleWithLevels(vec![ReasoningEffort::High, ReasoningEffort::Max]);
+        preset.default_reasoning_effort = Some(ReasoningEffort::High);
+
+        let enabled = preset.resolve_thinking_selection(Some("enabled"));
+        assert_eq!(enabled.request_thinking, Some(String::from("enabled")));
+        assert_eq!(
+            enabled.request_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+        assert_eq!(
+            enabled.effective_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+
+        let max = preset.resolve_thinking_selection(Some("max"));
+        assert_eq!(max.request_thinking, Some(String::from("enabled")));
+        assert_eq!(max.request_reasoning_effort, Some(ReasoningEffort::Max));
+        assert_eq!(max.effective_reasoning_effort, Some(ReasoningEffort::Max));
+
+        let disabled = preset.resolve_thinking_selection(Some("disabled"));
+        assert_eq!(disabled.request_thinking, Some(String::from("disabled")));
+        assert_eq!(disabled.request_reasoning_effort, None);
+        assert_eq!(disabled.effective_reasoning_effort, None);
+    }
+
+    #[test]
+>>>>>>> Stashed changes
     fn resolve_thinking_selection_uses_model_variants_when_configured() {
         let mut preset = model("kimi-k2.5");
         preset.thinking_capability = ThinkingCapability::Toggle;
@@ -662,6 +697,20 @@ mod tests {
         match deserialized {
             RequestContent::Text { text } => assert_eq!(text, "hello"),
             _ => panic!("expected Text"),
+        }
+    }
+
+    #[test]
+    fn request_content_reasoning_serde() {
+        let content = RequestContent::Reasoning {
+            text: "hello".into(),
+        };
+        let json = serde_json::to_string(&content).unwrap();
+        assert!(json.contains(r#""type":"reasoning""#));
+        let deserialized: RequestContent = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            RequestContent::Reasoning { text } => assert_eq!(text, "hello"),
+            _ => panic!("expected Reasoning"),
         }
     }
 

@@ -322,7 +322,9 @@ impl ChatWidget {
             .as_ref()
             .map(|model| model.slug.as_str())
             .unwrap_or("unknown");
-        let thinking = self.thinking_selection.as_deref().unwrap_or("unsupported");
+        let thinking = self
+            .display_thinking_selection()
+            .unwrap_or_else(|| "unsupported".to_string());
         let tokens = format!(
             "{} in / {} out",
             Self::format_token_count(self.total_input_tokens),
@@ -1224,16 +1226,42 @@ impl ChatWidget {
             .and_then(|resolved| resolved.effective_reasoning_effort)
     }
 
+    fn normalized_thinking_selection_for_display(&self, model: &Model) -> Option<String> {
+        let current = self
+            .thinking_selection
+            .as_deref()
+            .map(str::trim)
+            .filter(|selection| !selection.is_empty())
+            .map(str::to_ascii_lowercase)
+            .or_else(|| model.default_thinking_selection());
+
+        match model.effective_thinking_capability() {
+            ThinkingCapability::ToggleWithLevels(_) => {
+                if matches!(current.as_deref(), Some("disabled")) {
+                    Some(String::from("disabled"))
+                } else {
+                    model
+                        .resolve_thinking_selection(current.as_deref())
+                        .effective_reasoning_effort
+                        .map(|effort| effort.label().to_lowercase())
+                }
+            }
+            _ => current,
+        }
+    }
+
+    fn display_thinking_selection(&self) -> Option<String> {
+        let model = self.session.model.as_ref()?;
+        self.normalized_thinking_selection_for_display(model)
+    }
+
     pub(crate) fn thinking_entries(&self) -> Vec<ThinkingListEntry> {
         let Some(model) = &self.session.model else {
             return Vec::new();
         };
 
         let current = self
-            .thinking_selection
-            .as_deref()
-            .map(str::to_lowercase)
-            .or_else(|| model.default_thinking_selection())
+            .normalized_thinking_selection_for_display(model)
             .unwrap_or_default();
 
         model

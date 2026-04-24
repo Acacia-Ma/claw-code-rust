@@ -78,6 +78,15 @@ impl DefaultProjection {
                             body: content.clone(),
                         });
                     }
+                    ContentBlock::Reasoning { text } if !text.is_empty() => {
+                        history.push(SessionHistoryItem {
+                            tool_call_id: None,
+                            kind: SessionHistoryItemKind::Assistant,
+                            title: String::new(),
+                            body: text.clone(),
+                        });
+                    }
+                    ContentBlock::Reasoning { .. } => {}
                     ContentBlock::Text { .. } => {}
                 }
             }

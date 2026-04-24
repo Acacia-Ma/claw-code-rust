@@ -88,6 +88,7 @@ fn latest_assistant_text(messages: &[devo_core::Message]) -> Option<&str> {
             return None;
         }
         message.content.iter().find_map(|block| match block {
+            devo_core::ContentBlock::Reasoning { text } => Some(text.as_str()),
             devo_core::ContentBlock::Text { text } => Some(text.as_str()),
             devo_core::ContentBlock::ToolUse { .. }
             | devo_core::ContentBlock::ToolResult { .. } => None,

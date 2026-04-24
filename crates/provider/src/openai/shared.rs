@@ -43,8 +43,19 @@ pub(crate) fn reasoning_effort(thinking: Option<&str>) -> Option<OpenAIReasoning
 }
 
 pub(crate) enum OpenAIReasoningValue {
+<<<<<<< Updated upstream
     Effort(OpenAIReasoningEffort),
     Thinking { enabled: bool },
+=======
+    Effort(ReasoningEffort),
+    Thinking {
+        enabled: bool,
+    },
+    ThinkingWithEffort {
+        enabled: bool,
+        effort: Option<ReasoningEffort>,
+    },
+>>>>>>> Stashed changes
 }
 
 pub(crate) fn reasoning_value(

@@ -824,6 +824,9 @@ fn build_message(message: &RequestMessage) -> AnthropicInputMessage {
 fn build_content_block(block: &RequestContent) -> AnthropicInputContentBlock {
     match block {
         RequestContent::Text { text } => AnthropicInputContentBlock::Text { text: text.clone() },
+        RequestContent::Reasoning { text } => {
+            AnthropicInputContentBlock::Text { text: text.clone() }
+        }
         RequestContent::ToolUse { id, name, input } => AnthropicInputContentBlock::ToolUse {
             id: id.clone(),
             name: name.clone(),
