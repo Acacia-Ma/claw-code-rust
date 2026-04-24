@@ -20,7 +20,7 @@ use prompt_command::run_prompt;
 /// Top-level `devo` command that dispatches to interactive agent mode or one
 /// of the supporting runtime subcommands.
 ///
-/// The `devo-server` sub-binary is handled by `devo_arg0::run_as` via argv[0]
+/// The `devo-server` sub-binary is handled by `devo_arg0::run_as` via `argv[0]`
 /// dispatch and is not listed as a subcommand here.
 #[derive(Debug, Parser)]
 #[command(name = "devo", version, about = "Devo CLI")]

@@ -690,9 +690,9 @@ async fn run_worker_inner(
                                 latest_completed_agent_message = None;
                             }
                             "item/started" => {
-                                if let ServerEvent::ItemStarted(payload) = event {
-                                    if matches!(payload.item.item_kind, ItemKind::ToolCall) {
-                                        if let Ok(payload) = serde_json::from_value::<ToolCallPayload>(payload.item.payload) {
+                                if let ServerEvent::ItemStarted(payload) = event
+                                    && matches!(payload.item.item_kind, ItemKind::ToolCall)
+                                        && let Ok(payload) = serde_json::from_value::<ToolCallPayload>(payload.item.payload) {
                                             let summary = summarize_tool_call(&payload);
                                             let detail = Some(render_json_preview(&payload.parameters))
                                                 .filter(|detail: &String| !detail.is_empty());
@@ -702,9 +702,7 @@ async fn run_worker_inner(
                                                 detail,
                                             });
                                         }
-                                    }
                                 }
-                            }
                             "item/agentMessage/delta" => {
                                 if let ServerEvent::ItemDelta { payload, .. } = event {
                                     let _ = event_tx.send(WorkerEvent::TextDelta(payload.delta));

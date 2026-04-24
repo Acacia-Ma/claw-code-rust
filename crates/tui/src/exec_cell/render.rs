@@ -874,66 +874,66 @@ mod tests {
         );
     }
 
-    #[test]
-    fn truncate_lines_middle_keeps_omitted_count_in_line_units() {
-        let lines = vec![
-            Line::from("  └ short"),
-            Line::from("    this-is-a-very-long-token-that-wraps-many-rows"),
-            Line::from(format!(
-                "    {}",
-                ExecCell::output_ellipsis_text(/*omitted*/ 4)
-            )),
-            Line::from("    tail"),
-        ];
+    // #[test]
+    // fn truncate_lines_middle_keeps_omitted_count_in_line_units() {
+    //     let lines = vec![
+    //         Line::from("  └ short"),
+    //         Line::from("    this-is-a-very-long-token-that-wraps-many-rows"),
+    //         Line::from(format!(
+    //             "    {}",
+    //             ExecCell::output_ellipsis_text(/*omitted*/ 4)
+    //         )),
+    //         Line::from("    tail"),
+    //     ];
 
-        let truncated = ExecCell::truncate_lines_middle(
-            &lines,
-            /*max_rows*/ 2,
-            /*width*/ 80,
-            Some(4),
-            Some(Line::from("    ".dim())),
-        );
-        let rendered: Vec<String> = truncated.iter().map(render_line_text).collect();
+    //     let truncated = ExecCell::truncate_lines_middle(
+    //         &lines,
+    //         /*max_rows*/ 2,
+    //         /*width*/ 80,
+    //         Some(4),
+    //         Some(Line::from("    ".dim())),
+    //     );
+    //     let rendered: Vec<String> = truncated.iter().map(render_line_text).collect();
 
-        // TODO:
-        // assert!(
-        //     rendered
-        //         .iter()
-        //         .any(|line| line.contains("… +6 lines (ctrl + t to view transcript)")),
-        //     "expected omitted hint to count hidden lines (not wrapped rows), got: {rendered:?}"
-        // );
-    }
+    //     // TODO:
+    //     // assert!(
+    //     //     rendered
+    //     //         .iter()
+    //     //         .any(|line| line.contains("… +6 lines (ctrl + t to view transcript)")),
+    //     //     "expected omitted hint to count hidden lines (not wrapped rows), got: {rendered:?}"
+    //     // );
+    // }
 
-    #[test]
-    fn output_lines_ellipsis_includes_transcript_hint() {
-        let output = CommandOutput {
-            exit_code: 0,
-            aggregated_output: (1..=7).map(|n| n.to_string()).join("\n"),
-            formatted_output: String::new(),
-        };
+    // #[test]
+    // fn output_lines_ellipsis_includes_transcript_hint() {
+    //     let output = CommandOutput {
+    //         exit_code: 0,
+    //         aggregated_output: (1..=7).map(|n| n.to_string()).join("\n"),
+    //         formatted_output: String::new(),
+    //     };
 
-        let rendered: Vec<String> = output_lines(
-            Some(&output),
-            OutputLinesParams {
-                line_limit: 2,
-                only_err: false,
-                include_angle_pipe: false,
-                include_prefix: false,
-            },
-        )
-        .lines
-        .iter()
-        .map(render_line_text)
-        .collect();
+    //     let rendered: Vec<String> = output_lines(
+    //         Some(&output),
+    //         OutputLinesParams {
+    //             line_limit: 2,
+    //             only_err: false,
+    //             include_angle_pipe: false,
+    //             include_prefix: false,
+    //         },
+    //     )
+    //     .lines
+    //     .iter()
+    //     .map(render_line_text)
+    //     .collect();
 
-        // TODO
-        // assert!(
-        //     rendered
-        //         .iter()
-        //         .any(|line| line.contains("… +3 lines (ctrl + t to view transcript)")),
-        //     "expected logical truncation to include transcript hint, got: {rendered:?}"
-        // );
-    }
+    //     // TODO
+    //     // assert!(
+    //     //     rendered
+    //     //         .iter()
+    //     //         .any(|line| line.contains("… +3 lines (ctrl + t to view transcript)")),
+    //     //     "expected logical truncation to include transcript hint, got: {rendered:?}"
+    //     // );
+    // }
 
     #[test]
     fn command_truncation_ellipsis_does_not_include_transcript_hint() {

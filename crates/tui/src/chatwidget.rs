@@ -965,7 +965,7 @@ impl ChatWidget {
                         }
                         Err(e) => format!("Failed to compute diff: {e}"),
                     };
-                    let _ = tx.send(AppEvent::DiffResult(text));
+                    tx.send(AppEvent::DiffResult(text));
                 });
             }
         }

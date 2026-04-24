@@ -642,10 +642,7 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
     }
 
     let mut line = if props.status_line_enabled {
-        props
-            .status_line_value
-            .clone()
-            .map(|line| line)
+        props.status_line_value.clone()
     } else {
         None
     };
@@ -727,7 +724,6 @@ fn footer_hint_items_line(items: &[(String, String)]) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
@@ -735,7 +731,6 @@ mod tests {
             .map(|span| span.content.as_ref())
             .collect()
     }
-
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1084,4 +1079,3 @@ const SHORTCUTS: &[ShortcutDescriptor] = &[
         label: " to change mode",
     },
 ];
-

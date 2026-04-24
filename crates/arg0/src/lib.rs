@@ -1,4 +1,4 @@
-//! Single-binary dispatch via argv[0].
+//! Single-binary dispatch via `argv[0]`.
 //!
 //! Allows `devo` and `devo-server` to share a single executable. The trick:
 //!
@@ -48,7 +48,7 @@ pub struct Arg0DispatchPaths {
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-/// Entry‑point wrapper that performs argv[0] dispatch first.
+/// Entry‑point wrapper that performs `argv[0]` dispatch first.
 ///
 /// If the current executable was invoked as `devo-server` (via symlink or batch
 /// script), `run_as` runs the server entry‑point and exits the process.
