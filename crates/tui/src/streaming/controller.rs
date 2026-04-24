@@ -161,7 +161,7 @@ mod tests {
         let first_span = first_line.spans.first().expect("expected prefix span");
 
         assert_eq!(first_span.content.as_ref(), "• ");
-        assert_eq!(first_span.style.fg, Some(Color::Blue));
+        assert_eq!(first_span.style.fg, Some(Color::Cyan));
     }
 
     #[tokio::test]
