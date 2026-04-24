@@ -210,6 +210,8 @@ pub(crate) struct ChatWidget {
     status_message: String,
     active_assistant_text: String,
     active_reasoning_text: String,
+    active_assistant_cell: Option<history_cell::AgentMessageCell>,
+    active_reasoning_cell: Option<history_cell::AgentMessageCell>,
     stream_controller: Option<StreamController>,
     available_models: Vec<Model>,
     onboarding_step: Option<OnboardingStep>,
@@ -222,6 +224,10 @@ pub(crate) struct ChatWidget {
 }
 
 impl ChatWidget {
+    fn is_blank_line(line: &Line<'_>) -> bool {
+        line.spans.iter().all(|span| span.content.trim().is_empty())
+    }
+
     fn build_header_box(
         cwd: &std::path::Path,
         model: Option<&Model>,
@@ -418,6 +424,9 @@ impl ChatWidget {
         self.pending_tool_calls.clear();
         self.active_assistant_text.clear();
         self.active_reasoning_text.clear();
+        self.active_assistant_cell = None;
+        self.active_reasoning_cell = None;
+        self.stream_controller = None;
         self.bottom_pane.clear_composer();
         self.set_status_message("Resuming session");
     }
@@ -498,6 +507,8 @@ impl ChatWidget {
             status_message: "Ready".to_string(),
             active_assistant_text: String::new(),
             active_reasoning_text: String::new(),
+            active_assistant_cell: None,
+            active_reasoning_cell: None,
             stream_controller: None,
             available_models,
             onboarding_step: None,
@@ -623,6 +634,8 @@ impl ChatWidget {
                 self.busy = true;
                 self.active_assistant_text.clear();
                 self.active_reasoning_text.clear();
+                self.active_assistant_cell = None;
+                self.active_reasoning_cell = None;
                 self.stream_controller = None;
                 self.bottom_pane.set_task_running(true);
             }
@@ -632,16 +645,19 @@ impl ChatWidget {
             }
             WorkerEvent::ReasoningDelta(text) => {
                 self.active_reasoning_text.push_str(&text);
+                self.sync_active_reasoning_cell();
                 self.set_status_message("Thinking");
             }
             WorkerEvent::AssistantMessageCompleted(text) => {
                 if self.stream_controller.is_none() {
                     self.active_assistant_text = text;
                 }
+                self.sync_active_assistant_cell();
                 self.set_status_message("Generating");
             }
             WorkerEvent::ReasoningCompleted(text) => {
                 self.active_reasoning_text = text;
+                self.sync_active_reasoning_cell();
                 self.set_status_message("Thinking");
             }
             WorkerEvent::ToolCall {
@@ -812,6 +828,8 @@ impl ChatWidget {
                 self.thinking_selection = thinking;
                 self.active_assistant_text.clear();
                 self.active_reasoning_text.clear();
+                self.active_assistant_cell = None;
+                self.active_reasoning_cell = None;
                 self.stream_controller = None;
                 self.history.clear();
                 self.next_history_flush_index = 0;
@@ -844,6 +862,8 @@ impl ChatWidget {
                 self.next_history_flush_index = 0;
                 self.active_assistant_text.clear();
                 self.active_reasoning_text.clear();
+                self.active_assistant_cell = None;
+                self.active_reasoning_cell = None;
                 self.stream_controller = None;
                 self.total_input_tokens = total_input_tokens;
                 self.total_output_tokens = total_output_tokens;
@@ -925,6 +945,9 @@ impl ChatWidget {
                 self.next_history_flush_index = 0;
                 self.active_assistant_text.clear();
                 self.active_reasoning_text.clear();
+                self.active_assistant_cell = None;
+                self.active_reasoning_cell = None;
+                self.stream_controller = None;
                 self.set_status_message("Transcript cleared");
             }
             SlashCommand::Onboard => {
@@ -1191,6 +1214,9 @@ impl ChatWidget {
             Some(&self.session.cwd),
             &mut lines,
         );
+        if title == "Reasoning" {
+            Self::patch_lines_style(&mut lines, Self::reasoning_text_style());
+        }
         if title == "Assistant" || title == "Reasoning" {
             self.add_history_entry_without_redraw(Box::new(
                 history_cell::AgentMessageCell::new_ai_response_with_prefix(
@@ -1220,6 +1246,15 @@ impl ChatWidget {
         body: &str,
         prefix: Line<'static>,
     ) -> history_cell::AgentMessageCell {
+        self.bulleted_markdown_cell_with_style(body, prefix, Style::default())
+    }
+
+    fn bulleted_markdown_cell_with_style(
+        &self,
+        body: &str,
+        prefix: Line<'static>,
+        style: Style,
+    ) -> history_cell::AgentMessageCell {
         let mut lines = Vec::new();
         let markdown_width = usize::from(self.last_known_width().max(1)).min(AI_REPLY_WRAP_WIDTH);
         append_markdown(
@@ -1228,6 +1263,7 @@ impl ChatWidget {
             Some(&self.session.cwd),
             &mut lines,
         );
+        Self::patch_lines_style(&mut lines, style);
         history_cell::AgentMessageCell::new_ai_response_with_prefix(lines, prefix, "  ", false)
     }
 
@@ -1291,55 +1327,51 @@ impl ChatWidget {
             let reasoning_text = std::mem::take(&mut self.active_reasoning_text);
             self.add_markdown_history_with_status("Reasoning", &reasoning_text, status);
         }
+        self.active_reasoning_cell = None;
         self.finalize_assistant_stream();
         if !self.active_assistant_text.trim().is_empty() {
             let text = std::mem::take(&mut self.active_assistant_text);
             self.add_markdown_history_with_status("Assistant", &text, status);
         }
+        self.active_assistant_cell = None;
     }
 
     fn push_assistant_stream_delta(&mut self, text: &str) {
-        if self.stream_controller.is_none() {
-            let markdown_width = usize::from(self.last_known_width().saturating_sub(2).max(1))
-                .min(AI_REPLY_WRAP_WIDTH);
-            self.stream_controller = Some(StreamController::new(
-                Some(markdown_width),
-                &self.session.cwd,
-            ));
-        }
-
-        if let Some(controller) = self.stream_controller.as_mut() {
-            controller.push(text);
-        }
-
-        self.flush_assistant_stream_commits();
+        self.active_assistant_text.push_str(text);
+        self.sync_active_assistant_cell();
         self.frame_requester.schedule_frame();
     }
 
     fn flush_assistant_stream_commits(&mut self) {
-        let Some(controller) = self.stream_controller.as_mut() else {
-            return;
-        };
-
-        loop {
-            let (cell, idle) = controller.on_commit_tick();
-            let emitted = cell.is_some();
-            if let Some(cell) = cell {
-                self.history.push(cell);
-            }
-            if idle || !emitted {
-                break;
-            }
-        }
+        self.sync_active_assistant_cell();
     }
 
     fn finalize_assistant_stream(&mut self) {
-        let Some(mut controller) = self.stream_controller.take() else {
-            return;
-        };
+        self.stream_controller = None;
+        self.sync_active_assistant_cell();
+    }
 
-        if let Some(cell) = controller.finalize() {
-            self.history.push(cell);
+    fn sync_active_assistant_cell(&mut self) {
+        if !self.active_assistant_text.trim().is_empty() {
+            self.active_assistant_cell =
+                Some(self.bulleted_markdown_cell(
+                    &self.active_assistant_text,
+                    Self::pending_dot_prefix(),
+                ));
+        } else {
+            self.active_assistant_cell = None;
+        }
+    }
+
+    fn sync_active_reasoning_cell(&mut self) {
+        if !self.active_reasoning_text.trim().is_empty() {
+            self.active_reasoning_cell = Some(self.bulleted_markdown_cell_with_style(
+                &self.active_reasoning_text,
+                Self::pending_dot_prefix(),
+                Self::reasoning_text_style(),
+            ));
+        } else {
+            self.active_reasoning_cell = None;
         }
     }
 
@@ -1392,6 +1424,24 @@ impl ChatWidget {
             .as_ref()
             .map(|model| model.resolve_thinking_selection(self.thinking_selection.as_deref()))
             .and_then(|resolved| resolved.effective_reasoning_effort)
+    }
+
+    fn reasoning_text_style() -> Style {
+        Style::default().dim()
+    }
+
+    fn patch_lines_style(lines: &mut [Line<'static>], style: Style) {
+        if style == Style::default() {
+            return;
+        }
+
+        for line in lines {
+            line.spans = line
+                .spans
+                .drain(..)
+                .map(|span| span.patch_style(style))
+                .collect();
+        }
     }
 
     fn normalized_thinking_selection_for_display(&self, model: &Model) -> Option<String> {
@@ -1553,20 +1603,15 @@ impl ChatWidget {
     fn active_viewport_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         if let Some(active_cell) = &self.active_cell {
-            lines.extend(active_cell.display_lines(width));
+            Self::extend_lines_with_separator(&mut lines, active_cell.display_lines(width));
         }
-        if !self.active_reasoning_text.trim().is_empty() {
-            lines.extend(
-                self.bulleted_markdown_cell(
-                    &self.active_reasoning_text,
-                    Self::pending_dot_prefix(),
-                )
-                .display_lines(width),
-            );
+        if let Some(reasoning_cell) = &self.active_reasoning_cell {
+            Self::extend_lines_with_separator(&mut lines, reasoning_cell.display_lines(width));
         }
         // Pending tool calls are shown with a pending (cyan) dot until their results arrive.
         for pending in &self.pending_tool_calls {
-            lines.extend(
+            Self::extend_lines_with_separator(
+                &mut lines,
                 history_cell::AgentMessageCell::new_with_prefix(
                     pending.lines.clone(),
                     Self::pending_dot_prefix(),
@@ -1576,40 +1621,52 @@ impl ChatWidget {
                 .display_lines(width),
             );
         }
-        if !self.active_assistant_text.trim().is_empty() {
-            lines.extend(
-                self.bulleted_markdown_cell(
-                    &self.active_assistant_text,
-                    Self::pending_dot_prefix(),
-                )
-                .display_lines(width),
-            );
-        }
-        if let Some(controller) = &self.stream_controller {
-            let pending_lines = controller.pending_lines();
-            if !pending_lines.is_empty() {
-                lines.extend(
-                    history_cell::AgentMessageCell::new_ai_response_with_prefix(
-                        pending_lines,
-                        Self::pending_dot_prefix(),
-                        "  ",
-                        false,
-                    )
-                    .display_lines(width),
-                );
-            }
+        if let Some(assistant_cell) = &self.active_assistant_cell {
+            Self::extend_lines_with_separator(&mut lines, assistant_cell.display_lines(width));
         }
         Self::trim_trailing_blank_lines(&mut lines);
         lines
     }
 
+    fn extend_lines_with_separator(target: &mut Vec<Line<'static>>, mut next: Vec<Line<'static>>) {
+        if next.is_empty() {
+            return;
+        }
+
+        let should_insert_separator = !target.is_empty()
+            && target.last().is_some_and(|line| !Self::is_blank_line(line))
+            && next.first().is_some_and(|line| !Self::is_blank_line(line));
+        if should_insert_separator {
+            target.push(Line::from(""));
+        }
+        target.append(&mut next);
+    }
+
     pub(crate) fn drain_scrollback_lines(&mut self, width: u16) -> Vec<ScrollbackLine> {
         let width = width.max(1);
         let mut lines = Vec::new();
-        for cell in self.history.iter().skip(self.next_history_flush_index) {
+        for (index, cell) in self
+            .history
+            .iter()
+            .skip(self.next_history_flush_index)
+            .enumerate()
+        {
             let wrap_policy = cell.scrollback_wrap_policy();
+            let cell_lines = cell.display_lines(width);
+            let should_insert_separator = index > 0
+                && !cell_lines.is_empty()
+                && !lines.is_empty()
+                && lines
+                    .last()
+                    .is_some_and(|line: &ScrollbackLine| !Self::is_blank_line(&line.line))
+                && cell_lines
+                    .first()
+                    .is_some_and(|line| !Self::is_blank_line(line));
+            if should_insert_separator {
+                lines.push(ScrollbackLine::new(Line::from(""), wrap_policy));
+            }
             lines.extend(
-                cell.display_lines(width)
+                cell_lines
                     .into_iter()
                     .map(|line| ScrollbackLine::new(line, wrap_policy)),
             );

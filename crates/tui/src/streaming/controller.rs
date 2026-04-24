@@ -1,5 +1,6 @@
 use crate::history_cell::HistoryCell;
 use crate::history_cell::{self};
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::path::Path;
@@ -14,6 +15,7 @@ pub(crate) struct StreamController {
     state: StreamState,
     finishing_after_drain: bool,
     header_emitted: bool,
+    content_style: Style,
 }
 
 impl StreamController {
@@ -22,10 +24,15 @@ impl StreamController {
     /// The controller snapshots the path into stream state so later commit ticks and finalization
     /// render against the same session cwd that was active when streaming started.
     pub(crate) fn new(width: Option<usize>, cwd: &Path) -> Self {
+        Self::new_with_style(width, cwd, Style::default())
+    }
+
+    pub(crate) fn new_with_style(width: Option<usize>, cwd: &Path, content_style: Style) -> Self {
         Self {
             state: StreamState::new(width, cwd),
             finishing_after_drain: false,
             header_emitted: false,
+            content_style,
         }
     }
 
@@ -100,13 +107,14 @@ impl StreamController {
 
     /// Render the current uncommitted tail that should remain in the live viewport.
     pub(crate) fn pending_lines(&self) -> Vec<Line<'static>> {
-        self.state.collector.pending_lines()
+        patch_lines_style(self.state.collector.pending_lines(), self.content_style)
     }
 
     fn emit(&mut self, lines: Vec<Line<'static>>) -> Option<Box<dyn HistoryCell>> {
         if lines.is_empty() {
             return None;
         }
+        let lines = patch_lines_style(lines, self.content_style);
         let initial_prefix = if self.header_emitted {
             "  ".into()
         } else {
@@ -123,6 +131,22 @@ impl StreamController {
             ),
         ))
     }
+}
+
+fn patch_lines_style(mut lines: Vec<Line<'static>>, style: Style) -> Vec<Line<'static>> {
+    if style == Style::default() {
+        return lines;
+    }
+
+    for line in &mut lines {
+        line.spans = line
+            .spans
+            .drain(..)
+            .map(|span| span.patch_style(style))
+            .collect();
+    }
+
+    lines
 }
 
 #[cfg(test)]

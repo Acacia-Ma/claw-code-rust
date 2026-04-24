@@ -990,6 +990,7 @@ fn project_history_items(items: &[SessionHistoryItem]) -> Vec<TranscriptItem> {
         let kind = match item.kind {
             SessionHistoryItemKind::User => TranscriptItemKind::User,
             SessionHistoryItemKind::Assistant => TranscriptItemKind::Assistant,
+            SessionHistoryItemKind::Reasoning => TranscriptItemKind::Reasoning,
             SessionHistoryItemKind::ToolCall => TranscriptItemKind::ToolCall,
             SessionHistoryItemKind::ToolResult => TranscriptItemKind::ToolResult,
             SessionHistoryItemKind::Error => TranscriptItemKind::Error,
@@ -1002,7 +1003,9 @@ fn project_history_items(items: &[SessionHistoryItem]) -> Vec<TranscriptItem> {
             SessionHistoryItemKind::Error => {
                 TranscriptItem::tool_error(item.title.clone(), item.body.clone())
             }
-            SessionHistoryItemKind::User | SessionHistoryItemKind::Assistant => {
+            SessionHistoryItemKind::User
+            | SessionHistoryItemKind::Assistant
+            | SessionHistoryItemKind::Reasoning => {
                 TranscriptItem::new(kind, item.title.clone(), item.body.clone())
             }
         };
@@ -1245,6 +1248,7 @@ mod tests {
     use super::truncate_tool_output;
     use crate::events::SessionListEntry;
     use crate::events::TranscriptItem;
+    use crate::events::TranscriptItemKind;
     use devo_server::SessionHistoryItem;
     use devo_server::SessionHistoryItemKind;
     use devo_server::ToolCallPayload;
@@ -1407,6 +1411,25 @@ mod tests {
                 TranscriptItem::restored_tool_result("Ran read a", "A"),
                 TranscriptItem::restored_tool_result("Ran read b", "B"),
             ]
+        );
+    }
+
+    #[test]
+    fn project_history_preserves_reasoning_items() {
+        let items = vec![SessionHistoryItem {
+            tool_call_id: None,
+            kind: SessionHistoryItemKind::Reasoning,
+            title: String::new(),
+            body: "thinking aloud".to_string(),
+        }];
+
+        assert_eq!(
+            project_history_items(&items),
+            vec![TranscriptItem::new(
+                TranscriptItemKind::Reasoning,
+                "",
+                "thinking aloud"
+            )]
         );
     }
 }

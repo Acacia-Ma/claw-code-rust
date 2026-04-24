@@ -66,6 +66,7 @@ pub struct SessionResumeResult {
 pub enum SessionHistoryItemKind {
     User,
     Assistant,
+    Reasoning,
     ToolCall,
     ToolResult,
     Error,

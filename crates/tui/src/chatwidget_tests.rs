@@ -82,6 +82,21 @@ fn rendered_rows(widget: &ChatWidget, width: u16, height: u16) -> Vec<String> {
         .collect()
 }
 
+fn scrollback_contains_text(lines: &[crate::history_cell::ScrollbackLine], text: &str) -> bool {
+    lines.iter().any(|line| {
+        line.line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+            .contains(text)
+    })
+}
+
+fn find_row_index(rows: &[String], needle: &str) -> Option<usize> {
+    rows.iter().position(|row| row.contains(needle))
+}
+
 #[test]
 fn thinking_entries_are_generated_from_model_capability_options() {
     let model = Model {
@@ -347,14 +362,14 @@ fn onboarding_updates_placeholder_text_for_each_step() {
 }
 
 #[test]
-fn streamed_lines_commit_to_history_without_growing_live_viewport_unbounded() {
+fn streamed_lines_stay_in_live_viewport_until_turn_finishes() {
     let cwd = std::env::current_dir().expect("current directory is available");
     let model = Model {
         slug: "test-model".to_string(),
         display_name: "Test Model".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+    let (mut widget, _app_event_rx) = widget_with_model(model.clone(), cwd);
 
     let base_height = widget.desired_height(80);
     for index in 0..12 {
@@ -363,16 +378,32 @@ fn streamed_lines_commit_to_history_without_growing_live_viewport_unbounded() {
         )));
     }
 
-    assert_eq!(widget.desired_height(80), base_height);
+    assert!(widget.desired_height(80) > base_height);
 
-    let committed_lines = widget.drain_scrollback_lines(80);
-    let committed_text = committed_lines
+    let committed_before_finish = widget.drain_scrollback_lines(80);
+    let committed_before_finish_text = committed_before_finish
         .iter()
         .flat_map(|line| line.line.spans.iter())
         .map(|span| span.content.as_ref())
         .collect::<String>();
-    assert!(committed_text.contains("line 0"));
-    assert!(committed_text.contains("line 11"));
+    assert!(!committed_before_finish_text.contains("line 0"));
+    assert!(!committed_before_finish_text.contains("line 11"));
+
+    widget.handle_worker_event(crate::events::WorkerEvent::TurnFinished {
+        stop_reason: "stop".to_string(),
+        turn_count: 1,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+    });
+
+    let committed_after_finish = widget.drain_scrollback_lines(80);
+    let committed_after_finish_text = committed_after_finish
+        .iter()
+        .flat_map(|line| line.line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    assert!(committed_after_finish_text.contains("line 0"));
+    assert!(committed_after_finish_text.contains("line 11"));
 }
 
 #[test]
@@ -383,7 +414,7 @@ fn committed_history_drains_to_scrollback_lines() {
         display_name: "Test Model".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+    let (mut widget, _app_event_rx) = widget_with_model(model.clone(), cwd.clone());
 
     let initial_lines = widget.drain_scrollback_lines(80);
     assert!(!initial_lines.is_empty());
@@ -400,14 +431,14 @@ fn committed_history_drains_to_scrollback_lines() {
 }
 
 #[test]
-fn streamed_history_does_not_insert_blank_lines_between_commits() {
+fn streamed_history_stays_empty_until_turn_finishes() {
     let cwd = std::env::current_dir().expect("current directory is available");
     let model = Model {
         slug: "test-model".to_string(),
         display_name: "Test Model".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+    let (mut widget, _app_event_rx) = widget_with_model(model.clone(), cwd.clone());
 
     let _ = widget.drain_scrollback_lines(80);
     widget.handle_worker_event(crate::events::WorkerEvent::TextDelta(
@@ -415,30 +446,18 @@ fn streamed_history_does_not_insert_blank_lines_between_commits() {
     ));
 
     let committed_lines = widget.drain_scrollback_lines(80);
-    let non_blank_lines = committed_lines
-        .iter()
-        .filter(|line| {
-            line.line
-                .spans
-                .iter()
-                .any(|span| !span.content.trim().is_empty())
-        })
-        .count();
-    let blank_lines = committed_lines.len().saturating_sub(non_blank_lines);
-
-    assert_eq!(2, non_blank_lines);
-    assert_eq!(0, blank_lines);
+    assert!(committed_lines.is_empty());
 }
 
 #[test]
-fn batched_history_does_not_insert_blank_lines_between_cells() {
+fn batched_history_inserts_one_blank_line_between_cells() {
     let cwd = std::env::current_dir().expect("current directory is available");
     let model = Model {
         slug: "test-model".to_string(),
         display_name: "Test Model".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+    let (mut widget, _app_event_rx) = widget_with_model(model.clone(), cwd.clone());
 
     let _ = widget.drain_scrollback_lines(80);
     widget.add_to_history(crate::history_cell::new_info_event(
@@ -462,7 +481,7 @@ fn batched_history_does_not_insert_blank_lines_between_cells() {
         .count();
 
     assert_eq!(
-        0, blank_lines,
+        1, blank_lines,
         "unexpected blank lines: {committed_lines:?}"
     );
 }
@@ -540,7 +559,7 @@ fn turn_finished_does_not_add_completion_status_line_to_history() {
         display_name: "Test Model".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+    let (mut widget, _app_event_rx) = widget_with_model(model.clone(), cwd.clone());
 
     let _ = widget.drain_scrollback_lines(80);
     widget.handle_worker_event(crate::events::WorkerEvent::TurnFinished {
@@ -601,6 +620,123 @@ fn streaming_pending_ai_reply_respects_wrap_limit_before_finalize() {
     assert!(
         rendered.contains("tail words"),
         "expected pending streaming reply to wrap suffix words together, got:\n{rendered}"
+    );
+}
+
+#[test]
+fn reasoning_text_commits_to_history_when_turn_finishes() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::TurnStarted {
+        model: "test-model".to_string(),
+        thinking: None,
+    });
+    widget.handle_worker_event(crate::events::WorkerEvent::ReasoningDelta(
+        "thinking text\n".to_string(),
+    ));
+
+    let empty_scrollback = widget.drain_scrollback_lines(80);
+    assert!(!scrollback_contains_text(
+        &empty_scrollback,
+        "thinking text"
+    ));
+
+    widget.handle_worker_event(crate::events::WorkerEvent::TurnFinished {
+        stop_reason: "stop".to_string(),
+        turn_count: 1,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+    });
+
+    let scrollback = widget.drain_scrollback_lines(80);
+    assert!(scrollback_contains_text(&scrollback, "thinking text"));
+}
+
+#[test]
+fn restored_reasoning_text_is_visible_in_transcript() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd.clone());
+
+    widget.handle_worker_event(crate::events::WorkerEvent::SessionSwitched {
+        session_id: "session-1".to_string(),
+        cwd,
+        title: None,
+        model: Some("test-model".to_string()),
+        thinking: None,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        history_items: vec![crate::events::TranscriptItem::new(
+            crate::events::TranscriptItemKind::Reasoning,
+            "",
+            "thinking text",
+        )],
+        loaded_item_count: 1,
+    });
+
+    let scrollback = widget.drain_scrollback_lines(80);
+    assert!(scrollback_contains_text(&scrollback, "thinking text"));
+}
+
+#[test]
+fn reasoning_and_assistant_stream_in_separate_cells() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::TurnStarted {
+        model: "test-model".to_string(),
+        thinking: None,
+    });
+    widget.handle_worker_event(crate::events::WorkerEvent::ReasoningDelta(
+        "thinking".to_string(),
+    ));
+    widget.handle_worker_event(crate::events::WorkerEvent::TextDelta(
+        "final answer".to_string(),
+    ));
+
+    let before_rows = rendered_rows(&widget, 80, 16);
+    let before = before_rows.join("\n");
+    assert!(
+        before.contains("thinking") && before.contains("final answer"),
+        "reasoning/text should both be visible while streaming:\n{before}"
+    );
+    let reasoning_row = find_row_index(&before_rows, "thinking").expect("missing reasoning row");
+    let assistant_row =
+        find_row_index(&before_rows, "final answer").expect("missing assistant row");
+    assert_eq!(
+        assistant_row,
+        reasoning_row + 2,
+        "expected one blank row between live cells"
+    );
+    assert!(
+        before_rows[reasoning_row + 1].trim().is_empty(),
+        "expected blank separator row, got: {:?}",
+        before_rows[reasoning_row + 1]
+    );
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ReasoningCompleted(
+        "thinking".to_string(),
+    ));
+
+    let after = rendered_rows(&widget, 80, 16).join("\n");
+    assert!(
+        after.contains("thinking") && after.contains("final answer"),
+        "reasoning/text should remain visible in separate cells:\n{after}"
     );
 }
 

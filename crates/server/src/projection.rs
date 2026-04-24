@@ -81,7 +81,7 @@ impl DefaultProjection {
                     ContentBlock::Reasoning { text } if !text.is_empty() => {
                         history.push(SessionHistoryItem {
                             tool_call_id: None,
-                            kind: SessionHistoryItemKind::Assistant,
+                            kind: SessionHistoryItemKind::Reasoning,
                             title: String::new(),
                             body: text.clone(),
                         });
@@ -108,13 +108,18 @@ pub(crate) fn history_item_from_turn_item(item: &TurnItem) -> Option<SessionHist
         }
         TurnItem::AgentMessage(TextItem { text })
         | TurnItem::Plan(TextItem { text })
-        | TurnItem::Reasoning(TextItem { text })
         | TurnItem::WebSearch(TextItem { text })
         | TurnItem::ImageGeneration(TextItem { text })
         | TurnItem::ContextCompaction(TextItem { text })
         | TurnItem::HookPrompt(TextItem { text }) => Some(SessionHistoryItem {
             tool_call_id: None,
             kind: SessionHistoryItemKind::Assistant,
+            title: String::new(),
+            body: text.clone(),
+        }),
+        TurnItem::Reasoning(TextItem { text }) => Some(SessionHistoryItem {
+            tool_call_id: None,
+            kind: SessionHistoryItemKind::Reasoning,
             title: String::new(),
             body: text.clone(),
         }),
