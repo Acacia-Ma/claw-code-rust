@@ -87,6 +87,7 @@ fn build_write_metadata(
             "files": [{
                 "path": path.display().to_string(),
                 "kind": "add",
+                "content": content,
                 "additions": content.lines().count(),
                 "deletions": 0
             }]

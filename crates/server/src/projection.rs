@@ -324,10 +324,18 @@ fn parse_edited_history_metadata(output: &serde_json::Value) -> Option<SessionHi
             .unwrap_or(0);
         let change = match kind {
             "add" => devo_protocol::protocol::FileChange::Add {
-                content: "\n".repeat(additions as usize),
+                content: file
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| "\n".repeat(additions as usize)),
             },
             "delete" => devo_protocol::protocol::FileChange::Delete {
-                content: "\n".repeat(deletions as usize),
+                content: file
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| "\n".repeat(deletions as usize)),
             },
             "update" | "move" => devo_protocol::protocol::FileChange::Update {
                 unified_diff: file

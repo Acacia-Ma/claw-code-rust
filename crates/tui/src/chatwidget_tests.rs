@@ -4153,6 +4153,30 @@ fn patch_applied_event_renders_edited_block() {
 }
 
 #[test]
+fn added_file_patch_applied_event_renders_added_content_lines() {
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, PathBuf::from("."));
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(
+        PathBuf::from("quicksort.rs"),
+        devo_protocol::protocol::FileChange::Add {
+            content: "pub fn quicksort() {\n    println!(\"hi\");\n}\n".to_string(),
+        },
+    );
+    widget.handle_worker_event(crate::events::WorkerEvent::PatchApplied { changes });
+
+    let blob = scrollback_plain_lines(&widget.drain_scrollback_lines(100)).join("\n");
+    assert!(blob.contains("Added quicksort.rs") || blob.contains("Edited quicksort.rs") || blob.contains("Added 1 file"));
+    assert!(blob.contains("pub fn quicksort()"), "expected added file content to render:\n{blob}");
+    assert!(blob.contains("println!(\"hi\");"), "expected added file body to render:\n{blob}");
+}
+
+#[test]
 fn apply_patch_style_full_git_diff_reports_non_zero_counts() {
     let model = Model {
         slug: "test-model".to_string(),
@@ -4323,6 +4347,54 @@ fn session_switch_without_rich_edited_metadata_degrades_to_tool_result_path() {
         blob.contains("Ran apply_patch output"),
         "missing rich metadata currently falls back to tool-result rendering:\n{blob}"
     );
+}
+
+#[test]
+fn session_switch_restores_added_file_content_in_edited_block() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(
+        PathBuf::from("quicksort.rs"),
+        devo_protocol::protocol::FileChange::Add {
+            content: "pub fn quicksort() {\n    println!(\"hi\");\n}\n".to_string(),
+        },
+    );
+    widget.handle_worker_event(crate::events::WorkerEvent::SessionSwitched {
+        session_id: "session-1".to_string(),
+        cwd: std::env::current_dir().expect("current directory is available"),
+        title: None,
+        model: Some("test-model".to_string()),
+        thinking: None,
+        reasoning_effort: None,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
+        last_query_total_tokens: 0,
+        last_query_input_tokens: 0,
+        prompt_token_estimate: 0,
+        history_items: Vec::new(),
+        rich_history_items: vec![devo_protocol::SessionHistoryItem {
+            tool_call_id: Some("call-1".to_string()),
+            kind: devo_protocol::SessionHistoryItemKind::ToolResult,
+            title: "write".to_string(),
+            body: String::new(),
+            metadata: Some(devo_protocol::SessionHistoryMetadata::Edited { changes }),
+            duration_ms: None,
+        }],
+        loaded_item_count: 1,
+        pending_texts: Vec::new(),
+    });
+
+    let blob = scrollback_plain_lines(&widget.drain_scrollback_lines(100)).join("\n");
+    assert!(blob.contains("pub fn quicksort()"), "expected restored added file content:\n{blob}");
+    assert!(blob.contains("println!(\"hi\");"), "expected restored added file body:\n{blob}");
 }
 
 #[test]

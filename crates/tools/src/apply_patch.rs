@@ -146,6 +146,10 @@ pub(crate) async fn exec_apply_patch(
             "relativePath": relative_path,
             "kind": kind_name,
             "type": kind_name,
+            "content": match change.kind {
+                PatchKind::Add | PatchKind::Move | PatchKind::Update => new_content,
+                PatchKind::Delete => old_content,
+            },
             "diff": diff,
             "patch": diff,
             "additions": additions,
