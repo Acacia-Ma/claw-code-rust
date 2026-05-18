@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use super::*;
 use crate::{FileChangePayload, TurnPlanStepPayload, TurnPlanUpdatedPayload};
+use devo_tools::tool_spec::ToolPreparationFeedback;
 use devo_utils::git_op::extract_paths_from_patch;
 use tokio::sync::mpsc;
 
 struct PendingToolCall {
-    item_id: ItemId,
-    item_seq: u64,
+    item_id: Option<ItemId>,
+    item_seq: Option<u64>,
     input: serde_json::Value,
     is_command_execution: bool,
     command: String,
@@ -185,7 +186,7 @@ fn command_execution_item_id_for_progress(
     pending_tool_calls
         .get(tool_use_id)
         .filter(|pending| pending.is_command_execution)
-        .map(|pending| pending.item_id)
+        .and_then(|pending| pending.item_id)
 }
 
 impl ServerRuntime {
@@ -377,7 +378,13 @@ impl ServerRuntime {
                         }
                         let is_command_execution = is_unified_exec_tool(&name);
                         let command = command_display_from_input(&name, &input);
-                        let item_kind = if is_file_change_tool(&name) {
+                        let preparation_feedback =
+                            runtime.deps.registry.preparation_feedback(&name);
+                        let item_kind = if preparation_feedback
+                            == ToolPreparationFeedback::LiveOnly
+                        {
+                            ItemKind::ToolCall
+                        } else if is_file_change_tool(&name) {
                             ItemKind::FileChange
                         } else if is_command_execution {
                             ItemKind::CommandExecution
@@ -386,9 +393,22 @@ impl ServerRuntime {
                         } else {
                             ItemKind::ToolCall
                         };
-                        let started_payload = if is_file_change_tool(&name) {
+                        let started_payload = if preparation_feedback
+                            == ToolPreparationFeedback::LiveOnly
+                        {
+                            serde_json::to_value(ToolCallPayload {
+                                tool_call_id: id.clone(),
+                                tool_name: name.clone(),
+                                parameters: input.clone(),
+                                command_actions: command_actions_from_tool_input(
+                                    &name, &command, &input,
+                                ),
+                            })
+                            .expect("serialize tool call payload")
+                        } else if is_file_change_tool(&name) {
                             serde_json::to_value(FileChangePayload {
                                 tool_call_id: id.clone(),
+                                tool_name: Some(name.clone()),
                                 changes: Vec::new(),
                                 is_error: false,
                             })
@@ -422,14 +442,21 @@ impl ServerRuntime {
                             })
                             .expect("serialize tool call payload")
                         };
-                        let (item_id, item_seq) = runtime
-                            .start_item(
-                                session_id,
-                                turn_for_events.turn_id,
-                                item_kind,
-                                started_payload,
-                            )
-                            .await;
+                        let (item_id, item_seq) = if preparation_feedback
+                            == ToolPreparationFeedback::LiveOnly
+                        {
+                            let (item_id, item_seq) = runtime
+                                .start_item(
+                                    session_id,
+                                    turn_for_events.turn_id,
+                                    item_kind,
+                                    started_payload,
+                                )
+                                .await;
+                            (Some(item_id), Some(item_seq))
+                        } else {
+                            (None, None)
+                        };
                         pending_tool_calls.insert(
                             id,
                             PendingToolCall {
@@ -451,7 +478,102 @@ impl ServerRuntime {
                         let tool_name = tool_names_by_id.get(&tool_use_id).cloned();
                         // First complete the pending ToolCall item so its item/completed
                         // arrives before the ToolResult item/completed.
-                        if let Some(pending) = pending_tool_calls.remove(&tool_use_id) {
+                        if let Some(mut pending) = pending_tool_calls.remove(&tool_use_id) {
+                            if pending.item_id.is_none() || pending.item_seq.is_none() {
+                                let started_payload = if let Some(tool_name) = tool_name.clone() {
+                                    let item_kind = if runtime
+                                        .deps
+                                        .registry
+                                        .preparation_feedback(&tool_name)
+                                        == ToolPreparationFeedback::LiveOnly
+                                    {
+                                        ItemKind::ToolCall
+                                    } else if is_file_change_tool(&tool_name) {
+                                        ItemKind::FileChange
+                                    } else if pending.is_command_execution {
+                                        ItemKind::CommandExecution
+                                    } else if is_plan_tool(&tool_name) {
+                                        ItemKind::Plan
+                                    } else {
+                                        ItemKind::ToolCall
+                                    };
+                                    let payload = if runtime
+                                        .deps
+                                        .registry
+                                        .preparation_feedback(&tool_name)
+                                        == ToolPreparationFeedback::LiveOnly
+                                    {
+                                        serde_json::to_value(ToolCallPayload {
+                                            tool_call_id: tool_use_id.clone(),
+                                            tool_name: tool_name.clone(),
+                                            parameters: pending.input.clone(),
+                                            command_actions: command_actions_from_tool_input(
+                                                &tool_name,
+                                                &pending.command,
+                                                &pending.input,
+                                            ),
+                                        })
+                                        .expect("serialize tool call payload")
+                                    } else if is_file_change_tool(&tool_name) {
+                                        serde_json::to_value(FileChangePayload {
+                                            tool_call_id: tool_use_id.clone(),
+                                            tool_name: Some(tool_name.clone()),
+                                            changes: Vec::new(),
+                                            is_error: false,
+                                        })
+                                        .expect("serialize file change payload")
+                                    } else if pending.is_command_execution {
+                                        serde_json::to_value(CommandExecutionPayload {
+                                            tool_call_id: tool_use_id.clone(),
+                                            tool_name: tool_name.clone(),
+                                            command: pending.command.clone(),
+                                            source: devo_protocol::protocol::ExecCommandSource::Agent,
+                                            command_actions: command_actions_from_tool_input(
+                                                &tool_name,
+                                                &pending.command,
+                                                &pending.input,
+                                            ),
+                                            output: None,
+                                            is_error: false,
+                                        })
+                                        .expect("serialize command execution payload")
+                                    } else if is_plan_tool(&tool_name) {
+                                        serde_json::json!({
+                                            "title": "Plan",
+                                            "text": ""
+                                        })
+                                    } else {
+                                        serde_json::to_value(ToolCallPayload {
+                                            tool_call_id: tool_use_id.clone(),
+                                            tool_name: tool_name.clone(),
+                                            parameters: pending.input.clone(),
+                                            command_actions: command_actions_from_tool_input(
+                                                &tool_name,
+                                                &pending.command,
+                                                &pending.input,
+                                            ),
+                                        })
+                                        .expect("serialize tool call payload")
+                                    };
+                                let (item_id, item_seq) = runtime
+                                    .start_item(
+                                        session_id,
+                                        turn_for_events.turn_id,
+                                        item_kind.clone(),
+                                        payload,
+                                    )
+                                    .await;
+                                    pending.item_id = Some(item_id);
+                                    pending.item_seq = Some(item_seq);
+                                    item_kind
+                                } else {
+                                    ItemKind::ToolCall
+                                };
+                                let _ = started_payload;
+                            }
+
+                            let pending_item_id = pending.item_id.expect("pending item id");
+                            let pending_item_seq = pending.item_seq.expect("pending item seq");
                             if let Some(tool_name) = tool_name.clone()
                                 && is_plan_tool(&tool_name)
                             {
@@ -479,8 +601,8 @@ impl ServerRuntime {
                                     .complete_item(
                                         session_id,
                                         turn_for_events.turn_id,
-                                        pending.item_id,
-                                        pending.item_seq,
+                                        pending_item_id,
+                                        pending_item_seq,
                                         ItemKind::Plan,
                                         TurnItem::Plan(TextItem {
                                             text: output_json.to_string(),
@@ -617,8 +739,8 @@ impl ServerRuntime {
                                     .complete_item(
                                         session_id,
                                         turn_for_events.turn_id,
-                                        pending.item_id,
-                                        pending.item_seq,
+                                        pending_item_id,
+                                        pending_item_seq,
                                         ItemKind::FileChange,
                                         TurnItem::ToolResult(ToolResultItem {
                                             tool_call_id: tool_use_id.clone(),
@@ -629,6 +751,7 @@ impl ServerRuntime {
                                         }),
                                         serde_json::to_value(FileChangePayload {
                                             tool_call_id: tool_use_id.clone(),
+                                            tool_name: Some(tool_name.clone()),
                                             changes,
                                             is_error,
                                         })
@@ -669,8 +792,8 @@ impl ServerRuntime {
                                     .complete_item(
                                         session_id,
                                         turn_for_events.turn_id,
-                                        pending.item_id,
-                                        pending.item_seq,
+                                        pending_item_id,
+                                        pending_item_seq,
                                         ItemKind::CommandExecution,
                                         TurnItem::CommandExecution(CommandExecutionItem {
                                             tool_call_id: tool_use_id.clone(),
@@ -700,8 +823,8 @@ impl ServerRuntime {
                                 .complete_item(
                                     session_id,
                                     turn_for_events.turn_id,
-                                    pending.item_id,
-                                    pending.item_seq,
+                                    pending_item_id,
+                                    pending_item_seq,
                                     ItemKind::ToolCall,
                                     TurnItem::ToolCall(ToolCallItem {
                                         tool_call_id: tool_use_id.clone(),
@@ -1374,8 +1497,8 @@ mod tests {
         pending_tool_calls.insert(
             "exec".to_string(),
             PendingToolCall {
-                item_id: command_item_id,
-                item_seq: 1,
+                item_id: Some(command_item_id),
+                item_seq: Some(1),
                 input: serde_json::json!({}),
                 is_command_execution: true,
                 command: "cargo test".to_string(),
@@ -1384,8 +1507,8 @@ mod tests {
         pending_tool_calls.insert(
             "read".to_string(),
             PendingToolCall {
-                item_id: tool_item_id,
-                item_seq: 2,
+                item_id: Some(tool_item_id),
+                item_seq: Some(2),
                 input: serde_json::json!({}),
                 is_command_execution: false,
                 command: String::new(),

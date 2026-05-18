@@ -220,6 +220,7 @@ struct ActiveToolCall {
     title: String,
     lines: Vec<Line<'static>>,
     exec_like: bool,
+    start_time: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1640,6 +1641,7 @@ impl ChatWidget {
             WorkerEvent::ToolCall {
                 tool_use_id,
                 summary,
+                preparing,
                 parsed_commands,
             } => {
                 let command = crate::exec_command::split_command_string(&summary);
@@ -1651,7 +1653,7 @@ impl ChatWidget {
                             devo_protocol::parse_command::ParsedCommand::Unknown { .. }
                         )
                     });
-                if exec_like {
+                if exec_like && !preparing {
                     if let Some(cell) = self
                         .active_cell
                         .as_mut()
@@ -1672,6 +1674,7 @@ impl ChatWidget {
                                 title: summary,
                                 lines: Vec::new(),
                                 exec_like: true,
+                                start_time: None,
                             },
                         );
                         self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
@@ -1696,6 +1699,7 @@ impl ChatWidget {
                             title: summary,
                             lines: Vec::new(),
                             exec_like: true,
+                            start_time: None,
                         },
                     );
                     self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
@@ -1704,24 +1708,50 @@ impl ChatWidget {
                     return;
                 }
 
-                let title = summary;
+                let title = if preparing
+                    && (summary.starts_with("write ")
+                        || summary.starts_with("write:")
+                        || summary == "apply_patch")
+                {
+                    if summary == "apply_patch" {
+                        "Preparing apply_patch...".to_string()
+                    } else {
+                        "Preparing write...".to_string()
+                    }
+                } else {
+                    summary
+                };
                 let tool_call = ActiveToolCall {
                     tool_use_id: tool_use_id.clone(),
                     title: title.clone(),
                     lines: vec![Self::running_tool_line(&title)],
                     exec_like: false,
+                    start_time: None,
                 };
-                self.active_tool_calls
-                    .insert(tool_use_id.clone(), tool_call.clone());
+                if preparing {
+                    self.pending_tool_calls.push(ActiveToolCall {
+                        start_time: Some(Instant::now()),
+                        ..tool_call
+                    });
+                } else {
+                    self.active_tool_calls
+                        .insert(
+                            tool_use_id.clone(),
+                            ActiveToolCall {
+                                start_time: None,
+                                ..tool_call.clone()
+                            },
+                        );
+                    self.add_history_entry_without_redraw(Box::new(
+                        history_cell::AgentMessageCell::new_with_prefix(
+                            tool_call.lines,
+                            self.dot_prefix(DotStatus::Pending),
+                            "  ",
+                            false,
+                        ),
+                    ));
+                }
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
-                self.add_history_entry_without_redraw(Box::new(
-                    history_cell::AgentMessageCell::new_with_prefix(
-                        tool_call.lines,
-                        self.dot_prefix(DotStatus::Pending),
-                        "  ",
-                        false,
-                    ),
-                ));
                 self.frame_requester.schedule_frame();
                 self.set_status_message("Tool started");
             }
@@ -1773,6 +1803,7 @@ impl ChatWidget {
                             title,
                             lines: Vec::new(),
                             exec_like: false,
+                            start_time: None,
                         });
 
                 if resolved_title.exec_like {
@@ -1860,6 +1891,7 @@ impl ChatWidget {
                 self.set_status_message("Plan updated");
             }
             WorkerEvent::PatchApplied { changes } => {
+                self.pending_tool_calls.clear();
                 self.add_to_history(history_cell::new_patch_event(changes, &self.session.cwd));
                 self.set_status_message("Patch applied");
             }
@@ -3535,10 +3567,19 @@ impl ChatWidget {
         }
         // Pending tool calls are shown with a pending (cyan) dot until their results arrive.
         for pending in &self.pending_tool_calls {
+            let pending_lines = if let Some(start_time) = pending.start_time {
+                vec![Line::from(vec![
+                    crate::exec_cell::spinner(Some(start_time), true),
+                    " ".into(),
+                    Span::styled(pending.title.clone(), Self::tool_text_style()),
+                ])]
+            } else {
+                pending.lines.clone()
+            };
             Self::extend_lines_with_separator(
                 &mut lines,
                 history_cell::AgentMessageCell::new_with_prefix(
-                    pending.lines.clone(),
+                    pending_lines,
                     Self::pending_dot_prefix(),
                     "  ",
                     false,
@@ -3575,10 +3616,19 @@ impl ChatWidget {
             );
         }
         for pending in &self.pending_tool_calls {
+            let pending_lines = if let Some(start_time) = pending.start_time {
+                vec![Line::from(vec![
+                    crate::exec_cell::spinner(Some(start_time), true),
+                    " ".into(),
+                    Span::styled(pending.title.clone(), Self::tool_text_style()),
+                ])]
+            } else {
+                pending.lines.clone()
+            };
             Self::extend_lines_with_separator(
                 &mut lines,
                 history_cell::AgentMessageCell::new_with_prefix(
-                    pending.lines.clone(),
+                    pending_lines,
                     Self::pending_dot_prefix(),
                     "  ",
                     false,

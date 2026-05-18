@@ -6,7 +6,7 @@ use devo_protocol::ToolDefinition;
 use crate::errors::ToolDispatchError;
 use crate::invocation::{ToolInvocation, ToolOutput};
 use crate::tool_handler::ToolHandler;
-use crate::tool_spec::{ToolExecutionMode, ToolSpec};
+use crate::tool_spec::{ToolExecutionMode, ToolPreparationFeedback, ToolSpec};
 use crate::unified_exec::store::ProcessStore;
 
 #[derive(Clone)]
@@ -42,6 +42,12 @@ impl ToolRegistry {
 
     pub fn supports_parallel(&self, name: &str) -> bool {
         self.spec(name).is_some_and(|s| s.supports_parallel)
+    }
+
+    pub fn preparation_feedback(&self, name: &str) -> ToolPreparationFeedback {
+        self.spec(name)
+            .map(|spec| spec.preparation_feedback)
+            .unwrap_or(ToolPreparationFeedback::None)
     }
 
     pub async fn dispatch(
@@ -304,6 +310,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = builder.build();
         assert!(registry.get("echo").is_some());
@@ -322,6 +329,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = builder.build();
         let defs = registry.tool_definitions();
@@ -341,6 +349,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
 
         let registry = builder.build();
@@ -360,6 +369,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
 
         let registry = builder.build();
@@ -417,6 +427,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = builder.build();
         assert!(registry.supports_parallel("read"));
@@ -442,6 +453,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         builder.register_handler("write", Arc::new(EchoHandler));
         builder.push_spec(ToolSpec {
@@ -452,6 +464,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = builder.build();
         assert!(registry.is_read_only("read"));
@@ -471,6 +484,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = builder.build();
         let spec = registry.spec("tool");
@@ -497,6 +511,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = builder.build();
         let invocation = ToolInvocation {

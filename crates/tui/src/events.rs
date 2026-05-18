@@ -105,6 +105,8 @@ pub(crate) enum WorkerEvent {
         tool_use_id: String,
         /// Human-readable summary line for the tool execution.
         summary: String,
+        /// Whether this early tool signal should render as a live-only preparing state.
+        preparing: bool,
         /// Optional parsed command semantics for command-like and exploration-like tools.
         parsed_commands: Option<Vec<ParsedCommand>>,
     },

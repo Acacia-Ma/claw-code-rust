@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::handler_kind::ToolHandlerKind;
 use crate::json_schema::JsonSchema;
-use crate::tool_spec::{ToolCapabilityTag, ToolExecutionMode, ToolOutputMode, ToolSpec};
+use crate::tool_spec::{
+    ToolCapabilityTag, ToolExecutionMode, ToolOutputMode, ToolPreparationFeedback, ToolSpec,
+};
 
 const BASH_DESCRIPTION: &str = include_str!("bash.txt");
 const READ_DESCRIPTION: &str = include_str!("read.txt");
@@ -503,6 +505,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
             },
             ToolHandlerKind::ShellCommand,
         );
@@ -516,6 +519,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
             },
             ToolHandlerKind::Bash,
         );
@@ -530,6 +534,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::ReadFiles],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Read,
     );
@@ -543,6 +548,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![ToolCapabilityTag::WriteFiles],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::LiveOnly,
         },
         ToolHandlerKind::Write,
     );
@@ -557,6 +563,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Glob,
     );
@@ -570,6 +577,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Grep,
     );
@@ -583,6 +591,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![ToolCapabilityTag::WriteFiles],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::LiveOnly,
         },
         ToolHandlerKind::ApplyPatch,
     );
@@ -596,6 +605,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Plan,
     );
@@ -611,6 +621,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Question,
     );
@@ -625,6 +636,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Task,
     );
@@ -640,6 +652,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::NetworkAccess],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::WebFetch,
     );
@@ -653,6 +666,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::NetworkAccess],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::WebSearch,
     );
@@ -666,6 +680,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Skill,
     );
@@ -681,6 +696,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Lsp,
     );
@@ -695,6 +711,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         },
         ToolHandlerKind::Invalid,
     );
@@ -711,6 +728,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
             },
             ToolHandlerKind::ExecCommand,
         );
@@ -725,6 +743,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
             },
             ToolHandlerKind::WriteStdin,
         );

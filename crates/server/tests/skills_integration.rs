@@ -299,6 +299,7 @@ fn auto_review_registry(calls: Arc<std::sync::atomic::AtomicUsize>) -> Arc<ToolR
         execution_mode: ToolExecutionMode::Mutating,
         capability_tags: vec![devo_tools::ToolCapabilityTag::WriteFiles],
         supports_parallel: false,
+        preparation_feedback: devo_tools::ToolPreparationFeedback::None,
     });
     Arc::new(builder.build())
 }
@@ -951,6 +952,7 @@ async fn turn_steer_injects_resolved_skill_into_next_model_request() -> Result<(
         execution_mode: ToolExecutionMode::ReadOnly,
         capability_tags: vec![],
         supports_parallel: true,
+        preparation_feedback: devo_tools::ToolPreparationFeedback::None,
     });
     let registry = Arc::new(builder.build());
     let provider = Arc::new(SteerCapturingProvider::default());

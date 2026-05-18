@@ -1255,6 +1255,7 @@ async fn run_worker_inner(
                                                 let _ = event_tx.send(WorkerEvent::ToolCall {
                                                     tool_use_id: payload.tool_call_id,
                                                     summary: payload.command,
+                                                    preparing: false,
                                                     parsed_commands: Some(payload.command_actions),
                                                 });
                                             }
@@ -1269,6 +1270,7 @@ async fn run_worker_inner(
                                                 let _ = event_tx.send(WorkerEvent::ToolCall {
                                                     tool_use_id: payload.tool_call_id.clone(),
                                                     summary,
+                                                    preparing: payload.tool_name == "write",
                                                     parsed_commands: Some(payload.command_actions),
                                                 });
                                             }
@@ -2739,11 +2741,13 @@ mod tests {
             WorkerEvent::ToolCall {
                 tool_use_id: payload.tool_call_id.clone(),
                 summary: payload.command.clone(),
+                preparing: false,
                 parsed_commands: Some(payload.command_actions.clone()),
             },
             WorkerEvent::ToolCall {
                 tool_use_id: payload.tool_call_id,
                 summary: payload.command,
+                preparing: false,
                 parsed_commands: Some(payload.command_actions),
             }
         );

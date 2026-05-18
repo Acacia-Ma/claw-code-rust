@@ -2373,6 +2373,7 @@ fn tool_call_start_and_finish_are_both_visible_in_history() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "powershell -NoProfile -Command Get-Date".to_string(),
+        preparing: false,
         parsed_commands: None,
     });
 
@@ -2399,6 +2400,177 @@ fn tool_call_start_and_finish_are_both_visible_in_history() {
         ran.contains("2026-05-09"),
         "expected tool output, got:\n{ran}"
     );
+}
+
+#[test]
+fn preparing_write_tool_call_is_visible_before_result() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
+        tool_use_id: "tool-1".to_string(),
+        summary: "write src/lib.rs".to_string(),
+        preparing: true,
+        parsed_commands: None,
+    });
+
+    let display = rendered_rows(&widget, 80, 12).join("\n");
+    assert!(
+        display.contains("Preparing write..."),
+        "expected preparing write row:\n{display}"
+    );
+}
+
+#[test]
+fn non_preparing_tool_call_keeps_existing_summary() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
+        tool_use_id: "tool-1".to_string(),
+        summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
+        parsed_commands: None,
+    });
+
+    let display = rendered_rows(&widget, 80, 12).join("\n");
+    assert!(
+        display.contains("Exploring") || display.contains("Search plan"),
+        "expected normal tool summary:\n{display}"
+    );
+    assert!(
+        !display.contains("Preparing grep"),
+        "grep should not use preparing state:\n{display}"
+    );
+}
+
+#[test]
+fn preparing_write_disappears_after_patch_applied() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
+        tool_use_id: "tool-1".to_string(),
+        summary: "write src/lib.rs".to_string(),
+        preparing: true,
+        parsed_commands: None,
+    });
+    let before = rendered_rows(&widget, 80, 12).join("\n");
+    assert!(before.contains("Preparing write..."), "expected preparing state before result:\n{before}");
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(
+        PathBuf::from("src/lib.rs"),
+        devo_protocol::protocol::FileChange::Add {
+            content: "pub fn demo() {}\n".to_string(),
+        },
+    );
+    widget.handle_worker_event(crate::events::WorkerEvent::PatchApplied { changes });
+
+    let after = rendered_rows(&widget, 80, 16).join("\n");
+    assert!(!after.contains("Preparing write..."), "preparing state should disappear after patch applied:\n{after}");
+    let history = scrollback_plain_lines(&widget.drain_scrollback_lines(100)).join("\n");
+    assert!(history.contains("Added src/lib.rs") || history.contains("Edited src/lib.rs") || history.contains("Added 1 file"));
+}
+
+#[test]
+fn preparing_apply_patch_tool_call_is_visible_before_result() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
+        tool_use_id: "tool-1".to_string(),
+        summary: "apply_patch".to_string(),
+        preparing: true,
+        parsed_commands: None,
+    });
+
+    let display = rendered_rows(&widget, 80, 12).join("\n");
+    assert!(
+        display.contains("Preparing apply_patch..."),
+        "expected preparing apply_patch row:\n{display}"
+    );
+}
+
+#[test]
+fn preparing_apply_patch_disappears_after_patch_applied() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
+        tool_use_id: "tool-1".to_string(),
+        summary: "apply_patch".to_string(),
+        preparing: true,
+        parsed_commands: None,
+    });
+    let before = rendered_rows(&widget, 80, 12).join("\n");
+    assert!(
+        before.contains("Preparing apply_patch..."),
+        "expected preparing state before result:\n{before}"
+    );
+
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(
+        PathBuf::from("src/lib.rs"),
+        devo_protocol::protocol::FileChange::Add {
+            content: "pub fn demo() {}\n".to_string(),
+        },
+    );
+    widget.handle_worker_event(crate::events::WorkerEvent::PatchApplied { changes });
+
+    let after = rendered_rows(&widget, 80, 16).join("\n");
+    assert!(
+        !after.contains("Preparing apply_patch..."),
+        "preparing state should disappear after patch applied:\n{after}"
+    );
+}
+
+#[test]
+fn preparing_tool_row_animates_with_pre_draw_tick() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
+        tool_use_id: "tool-1".to_string(),
+        summary: "write src/lib.rs".to_string(),
+        preparing: true,
+        parsed_commands: None,
+    });
+    let before = rendered_rows(&widget, 80, 12).join("\n");
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    widget.pre_draw_tick();
+    let after = rendered_rows(&widget, 80, 12).join("\n");
+    assert_ne!(before, after, "expected preparing row to animate across ticks");
 }
 
 #[test]
@@ -3469,6 +3641,7 @@ fn transcript_overlay_lines_include_full_completed_tool_output() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "bash".to_string(),
+        preparing: false,
         parsed_commands: None,
     });
     widget.handle_worker_event(crate::events::WorkerEvent::ToolResult {
@@ -3526,6 +3699,7 @@ fn transcript_overlay_lines_include_running_tool_output_delta() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "bash".to_string(),
+        preparing: false,
         parsed_commands: None,
     });
     widget.handle_worker_event(crate::events::WorkerEvent::ToolOutputDelta {
@@ -3563,6 +3737,7 @@ fn read_tool_call_renders_as_explored_group_in_viewport() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "cat foo.txt".to_string(),
+        preparing: false,
         parsed_commands: None,
     });
     widget.handle_worker_event(crate::events::WorkerEvent::ToolResult {
@@ -3608,6 +3783,7 @@ fn glob_tool_call_renders_as_explored_group_in_viewport() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "glob **/Cargo.toml in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/Cargo.toml in crates".to_string(),
@@ -3654,6 +3830,7 @@ fn grep_tool_call_renders_as_explored_group_in_viewport() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'rebuild_restored_session' in crates/tui/src".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'rebuild_restored_session' in crates/tui/src".to_string(),
             query: Some("rebuild_restored_session".to_string()),
@@ -3699,6 +3876,7 @@ fn merged_explored_group_becomes_explored_after_all_results_arrive() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'plan' in crates".to_string(),
             query: Some("plan".to_string()),
@@ -3708,6 +3886,7 @@ fn merged_explored_group_becomes_explored_after_all_results_arrive() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-2".to_string(),
         summary: "glob **/plan.rs in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/plan.rs in crates".to_string(),
@@ -3765,6 +3944,7 @@ fn live_viewport_shows_explored_group_while_active() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'plan' in crates".to_string(),
             query: Some("plan".to_string()),
@@ -3774,6 +3954,7 @@ fn live_viewport_shows_explored_group_while_active() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-2".to_string(),
         summary: "glob **/plan.rs in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/plan.rs in crates".to_string(),
@@ -3820,6 +4001,7 @@ fn reasoning_start_closes_current_explored_group() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'plan' in crates".to_string(),
             query: Some("plan".to_string()),
@@ -3833,6 +4015,7 @@ fn reasoning_start_closes_current_explored_group() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-2".to_string(),
         summary: "glob **/plan.rs in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/plan.rs in crates".to_string(),
@@ -3872,6 +4055,7 @@ fn assistant_text_start_closes_current_explored_group() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'plan' in crates".to_string(),
             query: Some("plan".to_string()),
@@ -3885,6 +4069,7 @@ fn assistant_text_start_closes_current_explored_group() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-2".to_string(),
         summary: "glob **/plan.rs in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/plan.rs in crates".to_string(),
@@ -3924,6 +4109,7 @@ fn merged_explored_group_stays_completed_when_tool_results_arrive_after_tool_cal
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'plan' in crates".to_string(),
             query: Some("plan".to_string()),
@@ -3933,6 +4119,7 @@ fn merged_explored_group_stays_completed_when_tool_results_arrive_after_tool_cal
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-2".to_string(),
         summary: "glob **/plan.rs in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/plan.rs in crates".to_string(),
@@ -4004,6 +4191,7 @@ fn explored_group_in_history_can_finish_late_completions() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "grep 'plan' in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: "grep 'plan' in crates".to_string(),
             query: Some("plan".to_string()),
@@ -4013,6 +4201,7 @@ fn explored_group_in_history_can_finish_late_completions() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-2".to_string(),
         summary: "glob **/plan.rs in crates".to_string(),
+        preparing: false,
         parsed_commands: Some(vec![
             devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/plan.rs in crates".to_string(),
@@ -4031,6 +4220,7 @@ fn explored_group_in_history_can_finish_late_completions() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-3".to_string(),
         summary: "write src/main.rs".to_string(),
+        preparing: false,
         parsed_commands: None,
     });
 
@@ -4098,6 +4288,7 @@ async fn successful_write_tool_result_triggers_diff_event() {
     widget.handle_worker_event(crate::events::WorkerEvent::ToolCall {
         tool_use_id: "tool-1".to_string(),
         summary: "write src/main.rs".to_string(),
+        preparing: false,
         parsed_commands: None,
     });
     widget.handle_worker_event(crate::events::WorkerEvent::ToolResult {

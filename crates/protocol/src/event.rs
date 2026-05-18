@@ -61,6 +61,8 @@ pub struct CommandExecutionPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileChangePayload {
     pub tool_call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
     pub changes: Vec<(std::path::PathBuf, FileChange)>,
     pub is_error: bool,
 }

@@ -545,7 +545,9 @@ mod tests {
     use crate::json_schema::JsonSchema;
     use crate::registry::ToolRegistryBuilder;
     use crate::tool_handler::ToolHandler;
-    use crate::tool_spec::{ToolExecutionMode, ToolOutputMode, ToolSpec};
+    use crate::tool_spec::{
+        ToolExecutionMode, ToolOutputMode, ToolPreparationFeedback, ToolSpec,
+    };
     use async_trait::async_trait;
     use pretty_assertions::assert_eq;
 
@@ -622,6 +624,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         builder.register_handler("write_tool", Arc::new(WriteTool));
         builder.push_spec(ToolSpec {
@@ -632,6 +635,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![ToolCapabilityTag::WriteFiles],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         builder.register_handler("delayed_read_tool", Arc::new(DelayedReadTool));
         builder.push_spec(ToolSpec {
@@ -642,6 +646,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         Arc::new(builder.build())
     }
@@ -1043,6 +1048,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         Arc::new(builder.build())
     }

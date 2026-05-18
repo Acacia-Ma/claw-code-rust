@@ -12,6 +12,7 @@ impl ToolSpec {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         }
     }
 }
@@ -29,6 +30,7 @@ mod tests {
         assert_eq!(spec.execution_mode, ToolExecutionMode::Mutating);
         assert!(spec.capability_tags.is_empty());
         assert!(!spec.supports_parallel);
+        assert_eq!(spec.preparation_feedback, ToolPreparationFeedback::None);
     }
 
     #[test]
@@ -85,6 +87,12 @@ pub enum ToolCapabilityTag {
     ReadImages,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolPreparationFeedback {
+    None,
+    LiveOnly,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSpec {
     pub name: String,
@@ -94,4 +102,5 @@ pub struct ToolSpec {
     pub execution_mode: ToolExecutionMode,
     pub capability_tags: Vec<ToolCapabilityTag>,
     pub supports_parallel: bool,
+    pub preparation_feedback: ToolPreparationFeedback,
 }

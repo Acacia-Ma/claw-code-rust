@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -610,6 +611,7 @@ pub async fn query(
         let mut assistant_text = String::new();
         let mut reasoning_text = String::new();
         let mut tool_uses: Vec<(String, String, serde_json::Value, String, bool)> = Vec::new();
+        let mut emitted_tool_use_starts: HashSet<String> = HashSet::new();
         let mut final_response = None;
         let mut stop_reason = None;
 
@@ -631,6 +633,13 @@ pub async fn query(
                 Ok(StreamEvent::ToolCallStart {
                     id, name, input, ..
                 }) => {
+                    if emitted_tool_use_starts.insert(id.clone()) {
+                        emit(QueryEvent::ToolUseStart {
+                            id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                        });
+                    }
                     tool_uses.push((id, name, input, String::new(), false));
                 }
                 Ok(StreamEvent::ToolCallInputDelta { partial_json, .. }) => {
@@ -784,11 +793,13 @@ pub async fn query(
                 } else {
                     initial_input
                 };
-                emit(QueryEvent::ToolUseStart {
-                    id: id.clone(),
-                    name: name.clone(),
-                    input: input.clone(),
-                });
+                if emitted_tool_use_starts.insert(id.clone()) {
+                    emit(QueryEvent::ToolUseStart {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    });
+                }
                 assistant_content.push(ContentBlock::ToolUse {
                     id: id.clone(),
                     name: name.clone(),
@@ -977,6 +988,7 @@ mod tests {
     use devo_protocol::Usage;
     use devo_provider::ModelProviderSDK;
     use devo_safety::PermissionMode;
+    use devo_tools::ToolPreparationFeedback;
     use devo_tools::ToolRegistry;
     use devo_tools::ToolRuntime;
     use devo_tools::errors::ToolExecutionError;
@@ -1462,6 +1474,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = Arc::new(builder.build());
         let deny_checker = PermissionChecker::new(|request| {
@@ -1957,6 +1970,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2010,6 +2024,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2067,6 +2082,7 @@ mod tests {
             execution_mode: ToolExecutionMode::Mutating,
             capability_tags: vec![],
             supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2144,6 +2160,7 @@ mod tests {
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![],
             supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
