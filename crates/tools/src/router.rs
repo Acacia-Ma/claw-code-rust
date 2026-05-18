@@ -545,9 +545,7 @@ mod tests {
     use crate::json_schema::JsonSchema;
     use crate::registry::ToolRegistryBuilder;
     use crate::tool_handler::ToolHandler;
-    use crate::tool_spec::{
-        ToolExecutionMode, ToolOutputMode, ToolPreparationFeedback, ToolSpec,
-    };
+    use crate::tool_spec::{ToolExecutionMode, ToolOutputMode, ToolPreparationFeedback, ToolSpec};
     use async_trait::async_trait;
     use pretty_assertions::assert_eq;
 

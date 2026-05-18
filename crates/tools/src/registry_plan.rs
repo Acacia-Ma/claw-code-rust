@@ -519,7 +519,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
-            preparation_feedback: ToolPreparationFeedback::None,
+                preparation_feedback: ToolPreparationFeedback::None,
             },
             ToolHandlerKind::Bash,
         );

@@ -1734,14 +1734,13 @@ impl ChatWidget {
                         ..tool_call
                     });
                 } else {
-                    self.active_tool_calls
-                        .insert(
-                            tool_use_id.clone(),
-                            ActiveToolCall {
-                                start_time: None,
-                                ..tool_call.clone()
-                            },
-                        );
+                    self.active_tool_calls.insert(
+                        tool_use_id.clone(),
+                        ActiveToolCall {
+                            start_time: None,
+                            ..tool_call.clone()
+                        },
+                    );
                     self.add_history_entry_without_redraw(Box::new(
                         history_cell::AgentMessageCell::new_with_prefix(
                             tool_call.lines,

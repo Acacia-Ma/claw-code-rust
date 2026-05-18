@@ -2471,7 +2471,10 @@ fn preparing_write_disappears_after_patch_applied() {
         parsed_commands: None,
     });
     let before = rendered_rows(&widget, 80, 12).join("\n");
-    assert!(before.contains("Preparing write..."), "expected preparing state before result:\n{before}");
+    assert!(
+        before.contains("Preparing write..."),
+        "expected preparing state before result:\n{before}"
+    );
 
     let mut changes = std::collections::HashMap::new();
     changes.insert(
@@ -2483,9 +2486,16 @@ fn preparing_write_disappears_after_patch_applied() {
     widget.handle_worker_event(crate::events::WorkerEvent::PatchApplied { changes });
 
     let after = rendered_rows(&widget, 80, 16).join("\n");
-    assert!(!after.contains("Preparing write..."), "preparing state should disappear after patch applied:\n{after}");
+    assert!(
+        !after.contains("Preparing write..."),
+        "preparing state should disappear after patch applied:\n{after}"
+    );
     let history = scrollback_plain_lines(&widget.drain_scrollback_lines(100)).join("\n");
-    assert!(history.contains("Added src/lib.rs") || history.contains("Edited src/lib.rs") || history.contains("Added 1 file"));
+    assert!(
+        history.contains("Added src/lib.rs")
+            || history.contains("Edited src/lib.rs")
+            || history.contains("Added 1 file")
+    );
 }
 
 #[test]
@@ -2570,7 +2580,10 @@ fn preparing_tool_row_animates_with_pre_draw_tick() {
     std::thread::sleep(std::time::Duration::from_millis(80));
     widget.pre_draw_tick();
     let after = rendered_rows(&widget, 80, 12).join("\n");
-    assert_ne!(before, after, "expected preparing row to animate across ticks");
+    assert_ne!(
+        before, after,
+        "expected preparing row to animate across ticks"
+    );
 }
 
 #[test]
@@ -4362,9 +4375,19 @@ fn added_file_patch_applied_event_renders_added_content_lines() {
     widget.handle_worker_event(crate::events::WorkerEvent::PatchApplied { changes });
 
     let blob = scrollback_plain_lines(&widget.drain_scrollback_lines(100)).join("\n");
-    assert!(blob.contains("Added quicksort.rs") || blob.contains("Edited quicksort.rs") || blob.contains("Added 1 file"));
-    assert!(blob.contains("pub fn quicksort()"), "expected added file content to render:\n{blob}");
-    assert!(blob.contains("println!(\"hi\");"), "expected added file body to render:\n{blob}");
+    assert!(
+        blob.contains("Added quicksort.rs")
+            || blob.contains("Edited quicksort.rs")
+            || blob.contains("Added 1 file")
+    );
+    assert!(
+        blob.contains("pub fn quicksort()"),
+        "expected added file content to render:\n{blob}"
+    );
+    assert!(
+        blob.contains("println!(\"hi\");"),
+        "expected added file body to render:\n{blob}"
+    );
 }
 
 #[test]
@@ -4584,8 +4607,14 @@ fn session_switch_restores_added_file_content_in_edited_block() {
     });
 
     let blob = scrollback_plain_lines(&widget.drain_scrollback_lines(100)).join("\n");
-    assert!(blob.contains("pub fn quicksort()"), "expected restored added file content:\n{blob}");
-    assert!(blob.contains("println!(\"hi\");"), "expected restored added file body:\n{blob}");
+    assert!(
+        blob.contains("pub fn quicksort()"),
+        "expected restored added file content:\n{blob}"
+    );
+    assert!(
+        blob.contains("println!(\"hi\");"),
+        "expected restored added file body:\n{blob}"
+    );
 }
 
 #[test]
