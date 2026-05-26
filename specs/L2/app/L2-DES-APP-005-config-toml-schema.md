@@ -45,6 +45,7 @@ The JSON auth schema stores credential material for the same source scopes. `con
 - `L1-REQ-TUI-010` requires onboarding to submit setup results for persistence.
 - `L1-REQ-APP-008` requires MCP integrations to be user-configured and status-visible.
 - `L1-REQ-APP-009` requires skills to be discoverable from configured sources with visible missing/unavailable states.
+- `L1-REQ-APP-003` requires permission modes, sandboxing, user approval for out-of-boundary actions, and fail-closed behavior when permission state is ambiguous.
 - `L1-REQ-APP-012` requires credential and privacy-safe projections.
 
 ## Design Requirement
@@ -563,6 +564,7 @@ When a setup flow writes both `config.toml` and `auth.json`, the program should 
 | related-to | L1-REQ-TUI-010 | 1 | specs/L1/L1-REQ-TUI-010-onboarding-ui.md | TUI onboarding collects values persisted by this schema. |
 | related-to | L1-REQ-APP-008 | 1 | specs/L1/L1-REQ-APP-008-mcp.md | MCP servers are configured through `config.toml` and use `auth.json` credential references. |
 | related-to | L1-REQ-APP-009 | 1 | specs/L1/L1-REQ-APP-009-skills.md | Skill roots and enablement are configured through `config.toml`. |
+| related-to | L1-REQ-APP-003 | 1 | specs/L1/L1-REQ-APP-003-safety.md | `[defaults].permission_policy` persists the default permission posture without replacing runtime approval or sandbox enforcement. |
 | related-to | L1-REQ-APP-012 | 1 | specs/L1/L1-REQ-APP-012-privacy-data-ownership.md | `auth.json` credential storage and redaction behavior protect secrets. |
 | related-to | L2-DES-APP-002 | 1 | specs/L2/app/L2-DES-APP-002-configuration-precedence.md | Source precedence resolves this schema across user and project files. |
 | related-to | L2-DES-MODEL-001 | 1 | specs/L2/model/L2-DES-MODEL-001-model-provider-binding.md | Provides concrete persistence fields for providers and model bindings. |
@@ -576,3 +578,4 @@ When a setup flow writes both `config.toml` and `auth.json`, the program should 
 |---:|---|---|---|---|
 | 1 | 2026-05-25 | Assistant | Initial | Initial TOML schema design for durable user and project configuration. |
 | 1 | 2026-05-25 | Human | Refinement | Moved API keys and other credential material into dedicated `auth.json` files and removed environment variables or external stores as the recommended credential persistence mechanism. |
+| 1 | 2026-05-25 | Assistant | Refinement | Linked persisted `permission_policy` defaults to application safety requirements. |

@@ -25,6 +25,7 @@ The TUI must show progress while work is happening and preserve a readable audit
 - `L1-REQ-TUI-003` requires a durable, readable, scrollable transcript.
 - `L1-REQ-TUI-004` requires visible idle, generating, tool, waiting, interrupted, failed, completed, background process, and input-mode states.
 - `L1-REQ-TUI-007` requires stable layout during streaming and resize.
+- `L1-REQ-CLIENT-002` requires active and restored sessions to render with a consistent visual and stylistic language.
 - `L1-REQ-APP-004` requires actionable diagnostics.
 - `L1-REQ-TOOL-005` requires visibility and manual stop access for background processes.
 - `L2-DES-APP-003` defines server-client event payloads.
@@ -32,6 +33,7 @@ The TUI must show progress while work is happening and preserve a readable audit
 - `L2-DES-TOOL-001` defines tool lifecycle and result summaries.
 - `L2-DES-APP-004` defines observability fields used by diagnostic display.
 - `L2-DES-CONTEXT-002` defines compaction lifecycle records and user-visible compaction notices.
+- `L2-DES-TUI-007` defines the shared live/replay transcript projection boundary used by TUI renderers.
 
 ## Design Requirement
 
@@ -48,6 +50,8 @@ Visible TUI frame
 ```
 
 The durable transcript projection provides stable review content. The live overlay provides in-progress streaming text, running tool output, waiting prompts, spinners, and active process state. When the server finalizes an item, the live overlay should reconcile into the durable transcript cell.
+
+`L2-DES-TUI-007` refines the projection boundary. Live server events and restored durable records must converge into the same transcript projection before cells are rendered, so completed live content and restored history use the same renderer path.
 
 ## Shell Placement Boundary
 
@@ -512,6 +516,7 @@ Rules:
 | refines | L1-REQ-TUI-003 | 1 | specs/L1/L1-REQ-TUI-003-transcript.md | Defines transcript cell types, review behavior, folding, and durable/live reconciliation. |
 | refines | L1-REQ-TUI-004 | 1 | specs/L1/L1-REQ-TUI-004-state-visibility.md | Defines visible state mapping for idle, generating, tools, approvals, questions, failures, interruptions, and background processes. |
 | related-to | L1-REQ-TUI-007 | 1 | specs/L1/L1-REQ-TUI-007-responsive-layout-readability.md | Streaming and transcript rendering must remain stable across resize and narrow widths. |
+| related-to | L1-REQ-CLIENT-002 | 1 | specs/L1/L1-REQ-CLIENT-002-session-rendering-consistency.md | Live transcript cells and restored transcript cells must share the same projection and renderer boundary. |
 | related-to | L1-REQ-TOOL-005 | 1 | specs/L1/L1-REQ-TOOL-005-background-process-management.md | Background process state and stop controls are rendered in the TUI. |
 | related-to | L1-REQ-APP-004 | 1 | specs/L1/L1-REQ-APP-004-observability.md | User-facing diagnostics and waiting reasons inform state display. |
 | related-to | L2-DES-APP-003 | 1 | specs/L2/app/L2-DES-APP-003-client-server-protocol.md | Server-client events drive live rendering. |
@@ -520,6 +525,7 @@ Rules:
 | related-to | L2-DES-APP-004 | 1 | specs/L2/app/L2-DES-APP-004-observability-architecture.md | Diagnostic fields provide recovery and phase display. |
 | related-to | L2-DES-CONTEXT-002 | 1 | specs/L2/context/L2-DES-CONTEXT-002-context-compaction.md | Compaction lifecycle records render as transcript-area status cells. |
 | related-to | L2-DES-TUI-006 | 1 | specs/L2/tui/L2-DES-TUI-006-full-transcript-alternate-screen.md | Defines full transcript alternate-screen projection, live-tail sync, and pager controls. |
+| related-to | L2-DES-TUI-007 | 1 | specs/L2/tui/L2-DES-TUI-007-session-rendering-consistency.md | Defines the shared live/replay projection and renderer boundary for transcript cells. |
 | specified-by | TBD | TBD | specs/L3/tui/TBD.md | L3 behavior has not been authored yet. |
 
 ## Revision Notes
@@ -536,3 +542,4 @@ Rules:
 | 1 | 2026-05-23 | Human | Refinement | Reconciled active work and interruption examples with the current transcript and working-indicator visual grammar. |
 | 1 | 2026-05-25 | Human | Refinement | Added exact transcript-area labels for manual compaction start, automatic compaction start, and compaction completion. |
 | 1 | 2026-05-25 | Assistant | Refinement | Linked `Ctrl+T` full transcript review to `L2-DES-TUI-006`. |
+| 1 | 2026-05-25 | Assistant | Refinement | Linked transcript rendering to the shared live/replay projection boundary in `L2-DES-TUI-007`. |

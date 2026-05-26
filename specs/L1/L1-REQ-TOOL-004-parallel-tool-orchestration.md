@@ -69,7 +69,8 @@ The program must execute tool calls listed in `multi_tool_use` concurrently as r
 
 | Relationship | Target ID | Target Revision | Target Path | Rationale |
 |---|---|---:|---|---|
-| refined-by | TBD | TBD | specs/L2/tool/TBD.md | L2 design has not been authored yet. |
+| refined-by | L2-DES-TOOL-002 | 1 | specs/L2/tool/L2-DES-TOOL-002-parallel-tool-orchestration.md | Defines explicit `multi_tool_use` child scheduling, normal child lifecycle controls, aggregation, visibility, cancellation, and testing strategy. |
+| related-to | L2-DES-TOOL-001 | 1 | specs/L2/tool/L2-DES-TOOL-001-built-in-tool-system.md | Defines shared tool registry and lifecycle behavior applied to each child call. |
 
 ## Revision Notes
 

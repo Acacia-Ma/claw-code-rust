@@ -64,7 +64,7 @@ The client interface must render active chat sessions and resumed chat history i
 
 | Relationship | Target ID | Target Revision | Target Path | Rationale |
 |---|---|---:|---|---|
-| refined-by | TBD | TBD | specs/L2/client/TBD.md | L2 design has not been authored yet. |
+| refined-by | L2-DES-TUI-007 | 1 | specs/L2/tui/L2-DES-TUI-007-session-rendering-consistency.md | Defines the TUI projection and renderer boundary that makes live and restored session rendering consistent. |
 
 ## Revision Notes
 

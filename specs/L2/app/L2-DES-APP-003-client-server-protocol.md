@@ -30,6 +30,7 @@ If every client launches its own private server process over stdio, those client
 - `L1-REQ-CONV-004` requires session forking from a specific turn and fork traceability.
 - `L1-REQ-CONV-005` requires editing the immediately preceding eligible user-authored message without mutating durable history.
 - `L1-REQ-APP-002` requires persistence and recovery behavior.
+- `L1-REQ-APP-003` requires permission modes, sandboxing, explicit approval for out-of-boundary actions, and user-visible approval outcomes.
 - `L1-REQ-AGENT-001` requires a complete execution workflow with visible task state.
 - `L1-REQ-AGENT-002` requires interrupt, cancel, inspect, and resume behavior.
 - `L1-REQ-AGENT-003` requires visible task planning with status updates.
@@ -41,11 +42,15 @@ If every client launches its own private server process over stdio, those client
 - `L1-REQ-APP-011` requires actionable error recovery and provider error detail presentation.
 - `L1-REQ-APP-012` requires user-data ownership, export, deletion, and credential-safe projections.
 - `L1-REQ-AGENT-005` restricts the question tool to Plan Mode.
+- `L1-REQ-APP-006` requires fuzzy search across user-facing entities.
+- `L1-REQ-CLIENT-004` requires `@` prefixed input to open fuzzy search.
 - `L1-REQ-TOOL-001` requires tool output safety and redaction visibility.
 - `L1-REQ-TOOL-002` requires baseline built-in tools, including planning, approval, questions, search, command execution, web, and delegation tools.
 - `L1-REQ-MEM-001` defines persistent memory as core-maintained internal state outside the routine client-server protocol surface.
 - `L2-DES-TOOL-001` defines the built-in tool system and plan tool.
 - `L2-DES-GOAL-001` defines Ralph Loop goal state, continuation, and budget behavior.
+- `L2-DES-APP-006` defines fuzzy-search providers and project file search.
+- `L2-DES-CLIENT-002` defines the `@` prefixed input action that consumes fuzzy search.
 - `L2-DES-CONV-001` defines durable session JSONL events and distinguishes provider, server-client, and durable event planes.
 
 ## Protocol Requirement
@@ -153,6 +158,9 @@ Representative client-to-server JSON-RPC request methods and response results:
 | `goal.complete` | Let the user mark the goal complete directly. | `session_id`, `goal_id`, optional `expected_goal_id`, `verification_summary`. | `accepted`, `goal`, `latest_sequence`. |
 | `goal.cancel` | End the goal without marking it complete. | `session_id`, `goal_id`, optional `expected_goal_id`, `reason`. | `accepted`, `goal`, `latest_sequence`. |
 | `goal.clear` | Remove the current goal from normal UI projections while preserving audit records. | `session_id`, `goal_id`, optional `expected_goal_id`. | `accepted`, `cleared_goal_id`, `latest_sequence`. |
+| `search.start` | Start a connection-local fuzzy-search session for one or more provider groups. | `session_id` where applicable, `client_search_id`, optional `providers`, `initial_query`, `limit`, optional `search_roots`, optional `include_indices`. | `search_id`, `providers`, `accepted`, `latest_sequence` where applicable. |
+| `search.update` | Update the query for an active fuzzy-search session. | `search_id`, `query`, optional `limit`, optional `include_indices`. | `search_id`, `accepted`, `query_revision`. |
+| `search.cancel` | Cancel or release an active fuzzy-search session. | `search_id`, optional `reason`. | `search_id`, `canceled`. |
 | `approval.respond` | Answer a pending tool or permission approval request. | `session_id`, `turn_id`, `approval_id`, `decision`, optional `note`. | `approval_id`, `accepted`, `latest_sequence`. |
 | `question.respond` | Answer a pending Plan Mode or question-tool prompt. | `session_id`, `turn_id`, `question_id`, `answers`, optional `freeform_text`. | `question_id`, `accepted`, `latest_sequence`. |
 | `model.list` | Return supported and configured model projections suitable for selection UI. | `include_supported`, `configured_only`, optional `capability_filter`. | `models`, `current_model`, credential status only. |
@@ -178,6 +186,9 @@ Representative server-to-client JSON-RPC notification methods:
 | `goal.updated` | Tell clients that the session goal was created, replaced, paused, resumed, blocked, completed, canceled, budget-limited, cleared, or updated with progress. | `sequence`, `session_id`, `goal`, `change_kind`, `source`, `source_turn_id` where applicable, `source_client_id` where applicable. |
 | `goal.continuationStarted` | Tell clients that an autonomous continuation turn has started for an active goal. | `sequence`, `session_id`, `goal_id`, `turn_id`, `reason`, `budget_state`. |
 | `goal.budgetLimited` | Tell clients that the goal stopped because a configured budget was reached. | `sequence`, `session_id`, `goal_id`, `budget_kind`, `budget_state`, `progress_summary`. |
+| `search.updated` | Send a connection-local fuzzy-search result snapshot to the requesting client. | `search_id`, `query`, `query_revision`, `provider_groups`, `is_complete`, optional `degraded_state`. |
+| `search.completed` | Tell the requesting client all active providers completed for the current query. | `search_id`, `query`, `query_revision`, `provider_statuses`. |
+| `search.failed` | Tell the requesting client a search session or provider failed. | `search_id`, `query`, `provider`, `error`, `recoverable`. |
 
 Notifications should include sequence numbers sufficient for clients to order events and request catch-up after reconnect.
 
@@ -208,6 +219,9 @@ Representative server-client event kinds:
 | `goal_updated` | Report creation, replacement, status transition, progress, blocker, verification, budget, or clear state for the current Ralph Loop goal. | `session_id`, `goal_id`, `operation`, `status`, `objective_preview`, `progress_summary`, `blocker_summary`, `verification_summary`, `budget_state`, `source`, `source_turn_id`, `timestamp`. |
 | `goal_continuation_started` | Report that the server started an autonomous continuation turn for an active goal. | `session_id`, `goal_id`, `turn_id`, `reason`, `budget_state`, `timestamp`. |
 | `goal_budget_limited` | Report that goal continuation stopped because a configured budget was reached. | `session_id`, `goal_id`, `budget_kind`, `budget_state`, `progress_summary`, `timestamp`. |
+| `search_updated` | Report a live fuzzy-search snapshot for a connection-local search session. | `search_id`, `query`, `query_revision`, `groups`, `matches`, `is_complete`, `timestamp`. |
+| `search_completed` | Report that all search providers completed for the active query. | `search_id`, `query`, `query_revision`, `provider_statuses`, `timestamp`. |
+| `search_failed` | Report that a fuzzy-search provider or session failed or degraded. | `search_id`, `query`, `provider`, `error`, `recoverable`, `timestamp`. |
 | `turn_started` | Tell all subscribed clients that a new turn has begun. | `session_id`, `turn_id`, `status`, `submitted_by_client_id`, `user_item_id`, `started_at`. |
 | `turn_resumed` | Tell subscribed clients that an interrupted or recoverable turn has been resumed by a linked continuation turn. | `session_id`, `interrupted_turn_id`, `resume_turn_id`, `resume_mode`, `submitted_by_client_id`, `timestamp`. |
 | `turn_status_changed` | Report a turn moving between running, waiting, completed, failed, or interrupted states. | `session_id`, `turn_id`, `previous_status`, `status`, `reason`, `timestamp`. |
@@ -225,7 +239,7 @@ Representative server-client event kinds:
 | `queue_item_added` | Show that a queued message was accepted. | `session_id`, `queue_item_id`, `position`, `content_preview`, `created_at`. |
 | `queue_item_started` | Show that a queued message has become the next executing turn. | `session_id`, `queue_item_id`, `turn_id`, `started_at`. |
 | `queue_item_canceled` | Show that a queued message was canceled before execution. | `session_id`, `queue_item_id`, `reason`, `timestamp`. |
-| `tool_call_started` | Show that a tool call has begun or is awaiting approval. | `session_id`, `turn_id`, `item_id`, `tool_call_id`, `tool_name`, `command_description` for command tools, `arguments_preview`, `approval_state`, `safety_state`. |
+| `tool_call_started` | Show that a tool call has begun or is awaiting approval. | `session_id`, `turn_id`, `item_id`, `tool_call_id`, `tool_name`, `command_description` for command tools, `arguments_preview`, `approval_state`, `safety_state`, optional `parent_tool_call_id`, optional `parallel_group_id`, optional `child_index`, optional `group_child_count`. |
 | `tool_call_updated` | Update tool call progress, streaming output preview, or status. | `session_id`, `turn_id`, `tool_call_id`, `status`, `progress`, `output_preview`, `redaction_state`, `safety_notice`, `timestamp`. |
 | `tool_call_completed` | Show final tool result state. | `session_id`, `turn_id`, `tool_call_id`, `status`, `result_summary`, `structured_status`, `output_ref`, `redaction_state`, `safety_notice`, `completed_at`. |
 | `background_process_updated` | Show state for a tracked background process started by the program. | `process_id`, `session_id`, `turn_id`, `command_label`, `status`, `runtime`, `recent_output_ref`, `stop_state`, `timestamp`. |
@@ -323,6 +337,24 @@ Rules:
 - If budget is reached, the server should emit `goal_budget_limited` and `goal_updated` so clients can explain that the goal stopped without implying verified completion.
 - Plan Mode suppresses autonomous goal continuation. Goal state remains viewable and user-controllable while Plan Mode is active.
 
+## Search Protocol Rules
+
+Fuzzy-search sessions are live client interaction state. They are not transcript turns, durable session events, or cross-client broadcasts by default.
+
+Rules:
+
+- `search.start` must return promptly with a server-owned `search_id` or a structured rejection.
+- `search.updated`, `search.completed`, and `search.failed` are sent only to the requesting client connection unless a later requirement defines shared picker state.
+- `search.update` should supersede prior query work for the same `search_id`.
+- Search query text is the literal keyword after the client prefix. It must not require or encode provider selectors such as file, skill, or MCP.
+- If `providers` is omitted, the server should use the default provider set for prefixed input.
+- Search notifications must include enough query identity, such as `query_revision`, for clients to ignore stale snapshots.
+- `search.cancel` should release worker state and stop provider work where possible.
+- Provider groups must preserve result type so clients can render skills, MCP entries, files, sessions, commands, or future providers distinctly.
+- File search results should use workspace-relative paths where possible and include explicit file or directory type.
+- Search results must respect workspace, permission, privacy, ignore, and exclude policy before being sent to clients.
+- Search events are live UI projections. They must not be written as session transcript records unless a user later submits a message containing a selected mention.
+
 ## Tool And Plan Protocol Rules
 
 Tool calls are requested by the model and executed by the server-owned tool supervisor. Clients observe canonical tool and plan events; they do not decide whether a model-requested tool call is valid except when an approval or question response is explicitly requested.
@@ -339,6 +371,7 @@ Rules:
 - In Normal Mode, question-tool attempts must be rejected before `question.requested` is emitted.
 - In Plan Mode, mutating tools must be blocked before execution and should produce a structured blocked result if requested.
 - `multi_tool_use` child calls must still produce per-tool events and must not bypass validation, approval, or mode gates.
+- `multi_tool_use` parent and child events should include `parallel_group_id`; child events should also include `parent_tool_call_id` and `child_index` so clients can render group-level and child-level activity independently.
 
 ## Approval And Question Resolution
 
@@ -347,8 +380,10 @@ Approval and question requests are single-resolution prompts. Multiple clients m
 Rules:
 
 - The server owns approval and question state.
+- Approval requests are the protocol surface for `L1-REQ-APP-003` safety escalation. A client may present and answer a prompt, but the server decides whether the answer satisfies the current permission, sandbox, mode, and safety policy.
 - A successful `approval.respond` or `question.respond` resolves the prompt and broadcasts `approval_resolved` or `question_resolved`.
 - If another client answers after the prompt has been resolved, the server must reject the request with a structured stale-state error such as `already_resolved`.
+- Approval responses must be scoped to the identified `approval_id` and must not be treated as an unlimited permission grant for later unrelated work.
 - `question.requested` must only be emitted when Plan Mode or another explicit requirement allows the question tool.
 - In Normal Mode, the server must reject question-tool attempts before emitting `question.requested`.
 
@@ -409,9 +444,12 @@ If a client disconnects, the server continues owning active work subject to user
 |---|---|---:|---|---|
 | refines | L1-REQ-APP-001 | 1 | specs/L1/L1-REQ-APP-001-client-server-arch.md | Defines protocol, transport, and process ownership for shared clients. |
 | related-to | L1-REQ-APP-002 | 1 | specs/L1/L1-REQ-APP-002-persistence.md | Reconnect and catch-up behavior depends on durable session state. |
+| related-to | L1-REQ-APP-003 | 1 | specs/L1/L1-REQ-APP-003-safety.md | Defines approval request and response protocol behavior for actions outside current permission boundaries. |
 | related-to | L1-REQ-APP-010 | 1 | specs/L1/L1-REQ-APP-010-configuration.md | Defines configuration inspection and update protocol behavior. |
 | related-to | L1-REQ-APP-011 | 1 | specs/L1/L1-REQ-APP-011-error-recovery.md | Defines error and retry event payload requirements. |
 | related-to | L1-REQ-APP-012 | 1 | specs/L1/L1-REQ-APP-012-privacy-data-ownership.md | Defines export, deletion, and credential-safe projection behavior. |
+| related-to | L1-REQ-APP-006 | 1 | specs/L1/L1-REQ-APP-006-fuzzysearch.md | Defines fuzzy-search request and live result event behavior. |
+| related-to | L1-REQ-CLIENT-004 | 1 | specs/L1/L1-REQ-CLIENT-004-prefixed-input-actions.md | Defines protocol support for `@` prefix fuzzy-search sessions. |
 | related-to | L1-REQ-AGENT-001 | 1 | specs/L1/L1-REQ-AGENT-001-execution-workflow.md | Exposes execution lifecycle requests and events to clients. |
 | related-to | L1-REQ-AGENT-002 | 1 | specs/L1/L1-REQ-AGENT-002-interrupt-resume.md | Defines interrupt, resume, active-work inspection, and background stop protocol surfaces. |
 | related-to | L1-REQ-AGENT-003 | 1 | specs/L1/L1-REQ-AGENT-003-task-planning.md | Exposes plan tool updates as client-visible plan state. |
@@ -432,7 +470,10 @@ If a client disconnects, the server continues owning active work subject to user
 | related-to | L2-DES-AGENT-001 | 1 | specs/L2/agent/L2-DES-AGENT-001-execution-engine.md | The protocol exposes execution engine state to clients. |
 | related-to | L2-DES-AGENT-002 | 1 | specs/L2/agent/L2-DES-AGENT-002-interrupt-resume-control.md | The protocol exposes interrupt and resume control actions. |
 | related-to | L2-DES-TOOL-001 | 1 | specs/L2/tool/L2-DES-TOOL-001-built-in-tool-system.md | The protocol exposes tool and plan state from the built-in tool system. |
+| related-to | L2-DES-TOOL-002 | 1 | specs/L2/tool/L2-DES-TOOL-002-parallel-tool-orchestration.md | Parallel tool groups require parent and child event identifiers for client rendering and replay. |
 | related-to | L2-DES-GOAL-001 | 1 | specs/L2/goal/L2-DES-GOAL-001-ralph-loop-goals.md | The protocol exposes user-owned goal controls and canonical goal notifications. |
+| related-to | L2-DES-APP-006 | 1 | specs/L2/app/L2-DES-APP-006-fuzzy-search-architecture.md | The protocol exposes fuzzy-search sessions and live result snapshots. |
+| related-to | L2-DES-CLIENT-002 | 1 | specs/L2/client/L2-DES-CLIENT-002-prefixed-input-actions.md | The protocol supports server-owned search providers used by prefixed input. |
 | related-to | L2-DES-CONV-001 | 1 | specs/L2/conv/L2-DES-CONV-001-session-jsonl-data-model.md | Durable session events are distinct from live server-client protocol events. |
 | related-to | L2-DES-APP-005 | 1 | specs/L2/app/L2-DES-APP-005-config-toml-schema.md | `config.inspect` and `config.update` operate on safe projections and updates derived from the `config.toml` and `auth.json` schemas. |
 | specified-by | TBD | TBD | specs/L3/app/TBD.md | L3 behavior has not been authored yet. |
@@ -463,4 +504,8 @@ If a client disconnects, the server continues owning active work subject to user
 | 1 | 2026-05-22 | Human | Refinement | Added plan update events and tool protocol rules for the built-in tool system. |
 | 1 | 2026-05-22 | Human | Refinement | Added command descriptions and natural-language result summaries to tool protocol projections. |
 | 1 | 2026-05-23 | Human | Refinement | Added Ralph Loop goal requests, notifications, server-client events, and protocol rules. |
+| 1 | 2026-05-25 | Human | Refinement | Added connection-local fuzzy-search requests, notifications, event payloads, and protocol rules. |
+| 1 | 2026-05-25 | Human | Refinement | Clarified that search query text is independent from provider selection for prefixed input. |
 | 1 | 2026-05-25 | Human | Refinement | Added compaction trigger source to context update events for transcript-area compaction notices. |
+| 1 | 2026-05-25 | Assistant | Refinement | Linked approval protocol behavior to `L1-REQ-APP-003` application safety. |
+| 1 | 2026-05-26 | Assistant | Refinement | Added parallel tool parent/child event identity fields for `multi_tool_use`. |

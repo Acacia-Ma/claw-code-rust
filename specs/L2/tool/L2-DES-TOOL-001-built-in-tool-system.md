@@ -30,6 +30,7 @@ The plan tool is part of the tool system rather than private model reasoning. It
 - `L1-REQ-AGENT-005` restricts the question tool to Plan Mode.
 - `L1-REQ-LLM-002` requires model-requested tool use through a controlled lifecycle.
 - `L1-REQ-TOOL-001` requires tool safety, approval, redaction, and bounded output.
+- `L1-REQ-APP-003` requires permission modes, sandboxing, and explicit user approval for actions outside the current permission boundary.
 - `L1-REQ-TOOL-005` requires background process visibility and manual stop behavior.
 - `L1-REQ-TOOL-003` requires configurable web search behavior.
 - `L1-REQ-TOOL-004` requires explicit parallel tool orchestration where enabled.
@@ -41,6 +42,7 @@ The plan tool is part of the tool system rather than private model reasoning. It
 - `L2-DES-APP-003` defines protocol events that expose tool and plan state.
 - `L2-DES-CONV-001` defines durable tool, plan, and transcript records.
 - `L2-DES-GOAL-001` defines the narrow model-facing goal update tool.
+- `L2-DES-TOOL-002` defines explicit `multi_tool_use` parallel orchestration behavior.
 
 ## Design Requirement
 
@@ -74,6 +76,8 @@ The registry should expose only tools available to the current session mode, per
 ## Permission Policy And Sandbox
 
 Tool execution is governed by permission policy and sandbox policy as separate layers.
+
+This design is one implementation surface for `L1-REQ-APP-003`: tool permission policy decides whether an action can proceed, needs review, or needs user approval, while sandbox policy constrains host access even after approval.
 
 `permission_policy` controls whether a tool call may proceed automatically, requires review, or requires user approval. The initial policy values are:
 
@@ -274,13 +278,14 @@ Tool availability should be resolved before tool schemas are exposed to the mode
 
 ## Parallel Tool Orchestration
 
-`multi_tool_use` is an explicit orchestration tool. It should not bypass the lifecycle of individual tool calls.
+`multi_tool_use` is an explicit orchestration tool. Detailed behavior is refined by `L2-DES-TOOL-002`. This document keeps only the shared tool-system invariants.
 
 Rules:
 
 - Each child tool call must be independently resolved, validated, authorized, and recorded.
-- Child calls should execute concurrently only when their tool definitions allow parallel execution.
-- Mutating child calls require conflict and safety handling before concurrent execution.
+- Child calls are scheduled concurrently by the orchestration tool.
+- The parent orchestration tool must not serialize, reorder, reject, or downgrade the group solely because of an additional runtime parallel-safety classification.
+- Each child still follows the same validation, permission, approval, sandbox, availability, and safety behavior that would apply if invoked directly.
 - The parent orchestration result should preserve child ordering, child ids, terminal states, and partial failures.
 - Progress events should be emitted per child call so clients can render work before the entire group completes.
 
@@ -367,6 +372,7 @@ Live server-client events may be more frequent than durable records, but replay 
 | related-to | L2-DES-APP-003 | 1 | specs/L2/app/L2-DES-APP-003-client-server-protocol.md | Protocol events expose tool and plan state to clients. |
 | related-to | L2-DES-CONV-001 | 1 | specs/L2/conv/L2-DES-CONV-001-session-jsonl-data-model.md | Durable records preserve tool and plan state. |
 | related-to | L2-DES-GOAL-001 | 1 | specs/L2/goal/L2-DES-GOAL-001-ralph-loop-goals.md | Defines goal status transitions exposed through the goal update tool. |
+| related-to | L2-DES-TOOL-002 | 1 | specs/L2/tool/L2-DES-TOOL-002-parallel-tool-orchestration.md | Refines explicit `multi_tool_use` child scheduling, visibility, aggregation, and cancellation. |
 | specified-by | TBD | TBD | specs/L3/tool/TBD.md | L3 behavior has not been authored yet. |
 
 ## Revision Notes
@@ -377,3 +383,5 @@ Live server-client events may be more frequent than durable records, but replay 
 | 1 | 2026-05-22 | Human | Refinement | Added command intent inputs and natural-language tool status summaries. |
 | 1 | 2026-05-23 | Human | Refinement | Added the narrow model-facing goal update tool for Ralph Loop completion and blockers. |
 | 1 | 2026-05-25 | Human | Refinement | Renamed tool metadata from `approval_policy` to `permission_policy` and separated permission policy from sandbox enforcement direction. |
+| 1 | 2026-05-25 | Assistant | Refinement | Added `L1-REQ-APP-003` as the application-safety source for tool permission, sandbox, and approval behavior. |
+| 1 | 2026-05-26 | Assistant | Refinement | Linked `multi_tool_use` behavior to `L2-DES-TOOL-002` and removed runtime-selected serialization wording. |

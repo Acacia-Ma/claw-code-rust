@@ -28,12 +28,14 @@ This document defines the high-level visual structure and responsive behavior. S
 - `L1-REQ-TUI-004` requires visible current execution state.
 - `L1-REQ-TUI-007` requires responsive layout and readability.
 - `L1-REQ-CLIENT-001` requires Unicode-safe and localization-ready client display behavior.
+- `L1-REQ-CLIENT-002` requires active and restored sessions to render with consistent visual treatment.
 - `L2-DES-APP-003` defines the canonical client/server events used to drive the UI.
 - `L2-DES-CONV-001` defines transcript turns, items, and durable replay state.
 - `L2-DES-TUI-003` defines composer and input-mode behavior.
 - `L2-DES-TUI-004` defines streaming transcript and state rendering.
 - `L2-DES-TUI-005` defines terminal lifecycle safety.
 - `L2-DES-TUI-006` defines the full transcript alternate-screen overlay entered by `Ctrl+T`.
+- `L2-DES-TUI-007` defines the shared live/replay transcript projection used by TUI renderers.
 
 ## Design Requirement
 
@@ -146,6 +148,8 @@ Shell-level responsibilities:
 
 The shell owns placement and clipping. `L2-DES-TUI-004` owns the detailed rendering of user, assistant, tool, shell, working, and completed-turn cells.
 
+The shell must not choose different layout or rendering paths based on whether a session is live or restored. It places the transcript projection defined by `L2-DES-TUI-007`; inline mode and restored-session mode differ only by transient overlays such as the composer, cursor, working spinner, and active animation state.
+
 Example shell composition with transcript content:
 
 ```text
@@ -210,12 +214,14 @@ Clients may optimistically render local input, but canonical state comes from th
 | related-to | L1-REQ-TUI-003 | 1 | specs/L1/L1-REQ-TUI-003-transcript.md | Provides the transcript viewport placement and layout constraints. |
 | related-to | L1-REQ-TUI-004 | 1 | specs/L1/L1-REQ-TUI-004-state-visibility.md | Defines shell regions that expose execution state. |
 | related-to | L1-REQ-CLIENT-001 | 1 | specs/L1/L1-REQ-CLIENT-001-localization-readiness.md | Responsive layout must account for Unicode and localized display width. |
+| related-to | L1-REQ-CLIENT-002 | 1 | specs/L1/L1-REQ-CLIENT-002-session-rendering-consistency.md | The shell places the same transcript projection for live and restored sessions. |
 | related-to | L2-DES-APP-003 | 1 | specs/L2/app/L2-DES-APP-003-client-server-protocol.md | Protocol events provide canonical state for the shell. |
 | related-to | L2-DES-CONV-001 | 1 | specs/L2/conv/L2-DES-CONV-001-session-jsonl-data-model.md | Durable transcript records are rendered in the viewport. |
 | related-to | L2-DES-TUI-003 | 1 | specs/L2/tui/L2-DES-TUI-003-composer-and-input-modes.md | Composer and input mode behavior fills the shell's bottom regions. |
 | related-to | L2-DES-TUI-004 | 1 | specs/L2/tui/L2-DES-TUI-004-streaming-transcript-and-state.md | Streaming transcript cells and state indicators populate the shell. |
 | related-to | L2-DES-TUI-005 | 1 | specs/L2/tui/L2-DES-TUI-005-terminal-lifecycle-safety.md | Terminal lifecycle behavior constrains inline and alternate-screen shell modes. |
 | related-to | L2-DES-TUI-006 | 1 | specs/L2/tui/L2-DES-TUI-006-full-transcript-alternate-screen.md | Defines the alternate-screen transcript review surface entered from the inline shell. |
+| related-to | L2-DES-TUI-007 | 1 | specs/L2/tui/L2-DES-TUI-007-session-rendering-consistency.md | Defines the shared live/replay projection that the shell places in the transcript viewport. |
 | specified-by | TBD | TBD | specs/L3/tui/TBD.md | L3 behavior has not been authored yet. |
 
 ## Revision Notes
@@ -228,3 +234,4 @@ Clients may optimistically render local input, but canonical state comes from th
 | 1 | 2026-05-23 | Human | Refinement | Updated working indicator examples to use the spinner frame style and kept consecutive read calls on separate Explore lines. |
 | 1 | 2026-05-23 | Human | Refinement | Clarified that multi-line composer and user-message background bands may repeat `┃` on content lines, but not on padding rows. |
 | 1 | 2026-05-25 | Assistant | Refinement | Linked the shell layout to the `Ctrl+T` full transcript alternate-screen design. |
+| 1 | 2026-05-25 | Assistant | Refinement | Linked shell placement to the shared live/replay transcript projection in `L2-DES-TUI-007`. |

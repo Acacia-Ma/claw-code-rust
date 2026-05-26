@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Human
-last_updated: 2026-05-21
+last_updated: 2026-05-25
 ---
 
 # L1-REQ-CLIENT-004 — Fuzzy Search Prefix
@@ -34,6 +34,7 @@ The client interface must recognize `@` at the beginning of input and route it t
 - If client input begins with `@`, the client must initiate fuzzy search rather than submitting the text as a normal chat message.
 - When `@` fuzzy search starts, the client must show a popup window immediately.
 - The fuzzy search popup must update results in real time based on the string following the `@` symbol.
+- The text immediately following `@` must be treated as the fuzzy search query keyword. The user must not be required to specify a result type after `@`.
 - Fuzzy search results must be grouped or ordered by type in this order: skills, MCP entries, then files in the current working directory.
 - Pressing Enter while a fuzzy search result is selected must confirm that selection.
 - The client must make it clear when input is in normal chat mode or fuzzy search mode.
@@ -49,6 +50,7 @@ The client interface must recognize `@` at the beginning of input and route it t
 
 - Given the user enters input beginning with `@`, when the prefix is typed, then the client immediately opens a fuzzy search popup.
 - Given the user continues typing after `@`, when the query changes, then the popup updates matching results in real time.
+- Given the user types text immediately after `@`, when fuzzy search runs, then that text is used as the query across enabled result types rather than being parsed as a type selector.
 - Given fuzzy search returns skills, MCP entries, and current-working-directory files, when the popup renders them, then skills appear before MCP entries and MCP entries appear before files.
 - Given a fuzzy search result is selected, when the user presses Enter, then the client confirms the selected result.
 - Given a search action would exceed permissions, when the action is invoked, then the program follows the applicable safety and approval behavior.
@@ -78,3 +80,4 @@ The client interface must recognize `@` at the beginning of input and route it t
 |---:|---|---|---|---|
 | 1 | 2026-05-21 | Assistant | Initial | Initial draft from approved user requirement. |
 | 1 | 2026-05-21 | Human | Refinement | Moved TUI-only terminal-command prefix behavior into a TUI requirement and scoped this requirement to `@` fuzzy search. |
+| 1 | 2026-05-25 | Human | Refinement | Clarified that text immediately after `@` is the fuzzy-search query and not a result-type selector. |

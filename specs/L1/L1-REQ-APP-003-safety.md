@@ -67,7 +67,11 @@ The program must enforce permissions, sandboxing, and user approval for actions 
 
 | Relationship | Target ID | Target Revision | Target Path | Rationale |
 |---|---|---:|---|---|
-| refined-by | TBD | TBD | specs/L2/app/TBD.md | L2 design has not been authored yet. |
+| related-to | L2-DES-APP-003 | 1 | specs/L2/app/L2-DES-APP-003-client-server-protocol.md | Defines approval request and response protocol behavior for actions outside current permission boundaries. |
+| related-to | L2-DES-TOOL-001 | 1 | specs/L2/tool/L2-DES-TOOL-001-built-in-tool-system.md | Defines tool permission policy, sandbox separation, approval gates, and blocked/denied tool outcomes. |
+| related-to | L2-DES-AGENT-001 | 1 | specs/L2/agent/L2-DES-AGENT-001-execution-engine.md | Applies permission, safety, approval, and redaction checks during tool dispatch. |
+| related-to | L2-DES-APP-005 | 1 | specs/L2/app/L2-DES-APP-005-config-toml-schema.md | Defines persisted default permission posture without replacing runtime approval or sandbox enforcement. |
+| related-to | L2-DES-TUI-CMD-007 | 1 | specs/L2/tui/slash-commands/L2-DES-TUI-CMD-007-permissions.md | Defines the TUI `/permissions` command and its boundary from pending approval responses. |
 
 ## Revision Notes
 
