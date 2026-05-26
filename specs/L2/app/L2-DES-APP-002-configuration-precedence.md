@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 ---
 
 # L2-DES-APP-002 — Configuration Precedence
@@ -19,7 +19,7 @@ Refine configuration requirements into a source-precedence and persistence desig
 
 The program has durable configuration at two scopes. User-scoped configuration carries personal defaults across projects. Project-scoped configuration carries settings that should apply when working inside a specific project directory.
 
-Onboarding creates durable model invocation configuration. That setup can include user providers, provider credential references, provider-specific model names, invocation methods, and reasoning effort defaults. Credential material such as API keys is saved in the companion `auth.json` file for the same source scope. These values must be saved before onboarding is considered complete.
+Onboarding creates durable model invocation configuration. That setup can include user providers, provider credential references, provider-specific model names, model display names, invocation methods, and reasoning effort defaults. Credential material such as API keys is saved in the companion `auth.json` file for the same source scope. These values must be saved before onboarding is considered complete.
 
 Post-onboarding model selection also interacts with configuration, but not every model selection should rewrite configuration files. The design must distinguish durable provider and binding records from current-session model selection and persisted default selection.
 
@@ -91,6 +91,7 @@ Successful onboarding model setup produces durable configuration data:
 - Provider name, base URL, and credential reference when a provider is added.
 - Credential material in `auth.json` when a provider credential is added or updated.
 - Provider-specific model name.
+- Model display name used by client surfaces.
 - Invocation method.
 - Reasoning effort when the selected supported model permits reasoning.
 - Default binding or default reasoning selection where required by the onboarding flow.
@@ -166,3 +167,4 @@ Rules:
 | 1 | 2026-05-25 | Human | Refinement | Separated durable configuration writes from session/default model selection and added conservative config file write requirements. |
 | 1 | 2026-05-25 | Human | Refinement | Linked configuration precedence to the concrete `config.toml` schema design. |
 | 1 | 2026-05-25 | Human | Refinement | Moved durable credential material from configuration records into companion `auth.json` files. |
+| 1 | 2026-05-26 | Human | Refinement | Added model display name to onboarding-created durable model binding configuration. |

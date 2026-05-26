@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 ---
 
 # L2-DES-CLIENT-002 — Prefixed Input Actions
@@ -120,7 +120,8 @@ Rules:
 
 Rules:
 
-- Enter confirms the currently selected result while the popup is open.
+- Enter confirms the currently focused result while the popup is open.
+- TUI renderers should mark the focused result with `>`. Prefix-search results normally do not use `●` because they are inserted references, not currently enabled options.
 - Confirmation inserts a structured mention into the composer.
 - Confirmation does not submit the chat turn by itself.
 - After confirmation, the composer returns to normal chat editing with the mention included.
@@ -216,3 +217,4 @@ Search events are live UI projections. They are not transcript records.
 |---:|---|---|---|---|
 | 1 | 2026-05-25 | Assistant | Initial | Initial prefixed input design for `@` fuzzy search, selection, mention insertion, escaping, provider grouping, and protocol boundaries. |
 | 1 | 2026-05-25 | Human | Refinement | Clarified that text immediately after `@` is the query keyword, not a provider or result-type selector. |
+| 1 | 2026-05-26 | Human | Refinement | Clarified TUI marker semantics for prefix-search result focus and avoided using `●` for inserted-reference results. |

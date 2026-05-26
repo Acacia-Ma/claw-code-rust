@@ -36,7 +36,7 @@ During compaction:
 ```text
 ┃ Manual Compaction Started
 
-⠋ Working · 4s
+⠋ Working · ⏱ 4s
 ```
 
 After successful compaction:

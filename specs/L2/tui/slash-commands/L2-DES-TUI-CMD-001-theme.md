@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-23
+last_updated: 2026-05-26
 ---
 
 # L2-DES-TUI-CMD-001 — Slash Command: /theme
@@ -30,15 +30,17 @@ Define the TUI behavior for `/theme`, which lets the user switch the terminal UI
 ```text
 ┃ /theme
 
-  devo-dark
-  devo-light
-  terminal-default
+> ● devo-dark
+    devo-light
+    terminal-default
 ```
 
 Rules:
 
-- The current theme is preselected.
-- Up and Down move selection; Enter applies; Esc cancels.
+- The current theme is marked with `●`.
+- The row focused by Up and Down navigation is marked with `>`.
+- If the focused row is also the current theme, both markers are shown.
+- Enter applies the focused row; Esc cancels.
 - Theme preview may apply optimistically while the popup is open.
 - If canceled, the TUI restores the previous theme.
 - The selected theme should be persisted after confirmation.
@@ -62,3 +64,4 @@ Rules:
 | Revision | Date | Author | Change Type | Notes |
 |---:|---|---|---|---|
 | 1 | 2026-05-23 | Assistant | Initial | Initial `/theme` command design. |
+| 1 | 2026-05-26 | Human | Refinement | Updated theme list marker semantics so `>` marks focus and `●` marks the current enabled theme. |

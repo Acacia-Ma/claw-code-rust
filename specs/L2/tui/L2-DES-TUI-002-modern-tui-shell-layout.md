@@ -1,6 +1,6 @@
 ---
 artifact_id: L2-DES-TUI-002
-revision: 1
+revision: 3
 status: Draft
 active_baseline: no
 supersedes:
@@ -36,6 +36,7 @@ This document defines the high-level visual structure and responsive behavior. S
 - `L2-DES-TUI-005` defines terminal lifecycle safety.
 - `L2-DES-TUI-006` defines the full transcript alternate-screen overlay entered by `Ctrl+T`.
 - `L2-DES-TUI-007` defines the shared live/replay transcript projection used by TUI renderers.
+- `L2-DES-TUI-008` defines the shared TUI style system for tokens, symbols, spacing, and animation.
 
 ## Design Requirement
 
@@ -46,6 +47,8 @@ The TUI should be organized as a stable vertical shell with five conceptual regi
 3. Active work strip or working indicator.
 4. Composer.
 5. Bottom status line.
+
+An optional pinned plan surface may appear between the transcript viewport and the composer when the active plan has pending, in-progress, or blocked work. It is a state surface owned by transcript/state rendering, not a separate shell mode.
 
 Inline mode and alternate-screen mode should use the same conceptual shell. Inline mode additionally preserves useful terminal scrollback above the live region where possible.
 
@@ -59,6 +62,19 @@ Inline mode and alternate-screen mode should use the same conceptual shell. Inli
 - Treat color as secondary information. Text labels must still communicate state without color.
 - Prefer summary lines plus expandable or scrollable detail for long content.
 - Keep the composer visible whenever the terminal is large enough for interaction.
+
+## Style System Boundary
+
+The shell layout owns region order, sizing, clipping, and responsive priority. It must not hardcode color palettes, spinner frames, popup row styling, or status glyph semantics. Those choices are owned by `L2-DES-TUI-008`.
+
+The shell should consume these style-system concepts:
+
+- Header border, wordmark, label, and value tokens.
+- Transcript and composer marker glyph `┃`.
+- User/composer background-band tokens.
+- Working spinner frames and active-state colors.
+- Bottom status line separators, mode colors, and context progress glyphs.
+- Responsive spacing rules for major regions.
 
 ## Standard Layout
 
@@ -97,7 +113,7 @@ The following sketch is normative for region order and relative priority. It is 
   -        return parse_bare_value(input);
   +        return parse_quoted_or_bare_value(input);
 
-⠋ Working · 12s
+⠋ Working · ⏱ 12s
 
 ┃ Ask Devo
 
@@ -108,7 +124,8 @@ Required characteristics:
 
 - The startup header provides product identity, version, current model, workspace, and reasoning effort.
 - The transcript viewport owns most vertical space.
-- The active work strip appears only when useful and shows transient live state such as `⠋ Working · 12s`.
+- The optional pinned plan surface appears only while there is active visible plan state.
+- The active work strip appears only when useful and shows transient live state such as `⠋ Working · ⏱ 12s`.
 - The composer remains above the bottom status line.
 - The bottom status line is reserved for active mode, current model/reasoning, token usage, and context-window pressure.
 - The `┃` glyph in transcript and composer regions is normally a single leading marker for the active prompt line, cell title, or first content line. User-message cells and the bottom input composer are background-band surfaces: when they contain multiple user-entered lines, each content line may repeat `┃`, while top and bottom padding rows keep the shared background without rendering the marker. Diff detail, tool output detail, and assistant wrapped text align under their content column and do not repeat the marker unless they are separate logical cells.
@@ -123,7 +140,7 @@ Theme mapping:
 - Header border glyphs such as `┏`, `━`, `┣`, `┃`, and `┗` use a muted grey foreground.
 - Header metadata labels `Model`, `Workspace`, and `Reasoning` use muted grey.
 - Header version text such as `v0.1.9` uses muted grey.
-- Header metadata values, such as model slug, workspace path, and reasoning value, use normal white foreground.
+- Header metadata values, such as model display name, workspace path, and reasoning value, use normal white foreground. The model slug is an identifier and should appear only where disambiguation is needed.
 - The header box should not rely on color alone; the border, labels, and values must remain readable in monochrome terminals.
 
 The tip line below the header should use bold styling for `Tip:` and normal styling for the tip content.
@@ -165,7 +182,7 @@ Example shell composition with transcript content:
 
 ┃ Running  cargo test parser::quoted -- --nocapture
 
-⠋ Working · 8s
+⠋ Working · ⏱ 8s
 
 ┃ Ask Devo
 
@@ -178,6 +195,7 @@ Example shell composition with transcript content:
 |---|---|---|
 | Header | Startup identity, version, model, workspace, and reasoning effort. | Consuming too many rows or repeating full configuration. |
 | Transcript viewport | Durable user-visible conversation, tool, approval, question, and error history. | Showing unlimited raw output inline. |
+| Pinned plan surface | Active visible plan state when configured as pinned. | Becoming a second transcript or showing completed-only plans forever. |
 | Active work strip | Current live work summary, waiting reason, running background process summary. | Becoming the only place important state appears. |
 | Composer | Current editable input, popups, mode-specific input affordances. | Being pushed off-screen during streaming. |
 | Bottom status line | Current mode, model/reasoning, token/cache usage, and context-window usage. | Duplicating long transcript content. |
@@ -222,6 +240,7 @@ Clients may optimistically render local input, but canonical state comes from th
 | related-to | L2-DES-TUI-005 | 1 | specs/L2/tui/L2-DES-TUI-005-terminal-lifecycle-safety.md | Terminal lifecycle behavior constrains inline and alternate-screen shell modes. |
 | related-to | L2-DES-TUI-006 | 1 | specs/L2/tui/L2-DES-TUI-006-full-transcript-alternate-screen.md | Defines the alternate-screen transcript review surface entered from the inline shell. |
 | related-to | L2-DES-TUI-007 | 1 | specs/L2/tui/L2-DES-TUI-007-session-rendering-consistency.md | Defines the shared live/replay projection that the shell places in the transcript viewport. |
+| related-to | L2-DES-TUI-008 | 1 | specs/L2/tui/L2-DES-TUI-008-style.md | Defines the shell's shared color, symbol, spacing, and animation style rules. |
 | specified-by | TBD | TBD | specs/L3/tui/TBD.md | L3 behavior has not been authored yet. |
 
 ## Revision Notes
@@ -235,3 +254,5 @@ Clients may optimistically render local input, but canonical state comes from th
 | 1 | 2026-05-23 | Human | Refinement | Clarified that multi-line composer and user-message background bands may repeat `┃` on content lines, but not on padding rows. |
 | 1 | 2026-05-25 | Assistant | Refinement | Linked the shell layout to the `Ctrl+T` full transcript alternate-screen design. |
 | 1 | 2026-05-25 | Assistant | Refinement | Linked shell placement to the shared live/replay transcript projection in `L2-DES-TUI-007`. |
+| 2 | 2026-05-26 | Assistant | Revision | Linked the shell layout to the shared TUI style system and clarified that visual tokens, symbols, spinner frames, and spacing are owned by `L2-DES-TUI-008`. |
+| 3 | 2026-05-26 | Assistant | Revision | Added the optional pinned plan surface as a shell placement between transcript and composer. |

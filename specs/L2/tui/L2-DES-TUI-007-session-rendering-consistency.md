@@ -202,7 +202,7 @@ Live while work is running:
 
 ┃ Running  cargo test parser::quoted -- --nocapture
 
-⠋ Working · 12s
+⠋ Working · ⏱ 12s
 ```
 
 Restored after completion:

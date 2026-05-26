@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Human
-last_updated: 2026-05-22
+last_updated: 2026-05-26
 ---
 
 # L1-REQ-MODEL-002 — Model Providers
@@ -49,7 +49,7 @@ The program must support configurable model providers for remote and local model
 - Provider entries must contain provider connection information such as provider name, base URL, and credential state.
 - Provider entries created during onboarding or model setup must be persistently saved to configuration.
 - When both project-scoped and user-scoped configuration files define overlapping provider settings, the project-scoped configuration must take precedence.
-- Provider entries must not own model-specific invocation details such as provider-specific model name, invocation method, or reasoning effort.
+- Provider entries must not own model-specific binding details such as provider-specific model name, model display name, invocation method, or reasoning effort.
 - Client interfaces may handle credential material during explicit provider setup, update, repair, or user-authorized reveal flows.
 - Routine provider status, model selection, and model listing data must represent credential state without returning plaintext credential values by default.
 - The user should be able to configure local model providers where supported.
@@ -100,3 +100,4 @@ The program must support configurable model providers for remote and local model
 | 1 | 2026-05-22 | Human | Refinement | Clarified explicit credential setup and user-authorized reveal flows versus routine status views that expose credential state without plaintext credentials by default. |
 | 1 | 2026-05-22 | Human | Refinement | Clarified that providers are user-defined reusable entries with generated identifiers and that invocation method belongs to the model-provider binding. |
 | 1 | 2026-05-22 | Human | Refinement | Added persistent storage and project-over-user precedence for provider entries. |
+| 1 | 2026-05-26 | Human | Refinement | Clarified that model display name belongs to model-provider bindings rather than provider records. |

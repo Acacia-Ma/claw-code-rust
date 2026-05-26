@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Human
-last_updated: 2026-05-23
+last_updated: 2026-05-27
 ---
 
 # L1-REQ-TUI-006 — Command Discovery and Control
@@ -21,6 +21,8 @@ The TUI is expected to expose commands for session control, configuration, model
 
 The `/model` command is the post-onboarding TUI command for changing the current session model and reasoning effort where the selected model supports reasoning.
 
+Onboarding is a startup/setup workflow, not a runtime slash command. Manual onboarding entry is handled through CLI arguments.
+
 ## User / Business Requirement
 
 The TUI must provide a discoverable command interface for controlling product workflows from the terminal.
@@ -34,6 +36,7 @@ The TUI must provide a discoverable command interface for controlling product wo
 - Commands that affect goals, sessions, configuration, model selection, theme, approval, or interruption must be represented consistently with the related product requirements.
 - The TUI must provide a `/model` command for the model-selection workflow.
 - The `/model` command must open a selection flow that begins with model selection and then offers reasoning effort selection when the chosen model supports reasoning.
+- Command discovery must not list onboarding as a slash command.
 
 ## Non-Functional Requirements
 
@@ -49,6 +52,7 @@ The TUI must provide a discoverable command interface for controlling product wo
 - Given the user starts typing a command, when suggestions are shown, then existing composer text is not lost unexpectedly.
 - Given the user invokes `/model`, when the command opens, then the TUI presents the model-selection workflow.
 - Given the user selects a reasoning-capable model through `/model`, when reasoning effort selection is needed, then the TUI presents supported reasoning effort choices for that model.
+- Given the user opens slash-command discovery, when commands are listed, then onboarding is not listed as a slash command.
 
 ## Out of Scope
 
@@ -71,3 +75,4 @@ The TUI must provide a discoverable command interface for controlling product wo
 |---:|---|---|---|---|
 | 1 | 2026-05-21 | Assistant | Initial | Initial draft approved for L1 expansion. |
 | 1 | 2026-05-22 | Human | Refinement | Added `/model` as the required post-onboarding TUI command for model and supported reasoning effort selection. |
+| 1 | 2026-05-27 | Human | Refinement | Clarified that onboarding is not a slash command and manual onboarding entry belongs to CLI arguments. |

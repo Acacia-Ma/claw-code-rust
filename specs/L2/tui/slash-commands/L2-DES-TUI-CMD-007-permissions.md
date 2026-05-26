@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-23
+last_updated: 2026-05-26
 ---
 
 # L2-DES-TUI-CMD-007 — Slash Command: /permissions
@@ -38,16 +38,18 @@ Define the TUI behavior for `/permissions`, which lets the user choose what the 
 ```text
 ┃ /permissions
 
-  default
-  auto-approved
-  full access
+> ● default
+    auto-approved
+    full access
 ```
 
 Rules:
 
-- The current permission mode is preselected.
+- The current permission mode is marked with `●`.
+- The row focused by Up and Down navigation is marked with `>`.
+- If the focused row is also the current permission mode, both markers are shown.
 - The popup must summarize the operational effect of each mode.
-- Enter applies; Esc cancels.
+- Enter applies the focused row; Esc cancels.
 - If a tool approval is currently pending, the TUI must distinguish changing the default permission mode from answering that specific approval.
 
 ## State And Error Behavior
@@ -87,3 +89,4 @@ Rules:
 |---:|---|---|---|---|
 | 1 | 2026-05-23 | Assistant | Initial | Initial `/permissions` command design. |
 | 1 | 2026-05-25 | Assistant | Refinement | Added application-safety source requirements and clarified the boundary between permission mode changes and approval responses. |
+| 1 | 2026-05-26 | Human | Refinement | Updated permission list marker semantics so `>` marks focus and `●` marks the current enabled permission mode. |

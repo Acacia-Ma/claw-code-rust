@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 ---
 
 # L2-DES-TUI-CMD-002 — Slash Command: /model
@@ -25,7 +25,7 @@ Define the TUI behavior for `/model`, the post-onboarding command for changing t
 
 ## Design Requirement
 
-`/model` should first show configured model-provider bindings from effective configuration. These bindings may have been created by onboarding or defined directly in configuration files. The last row in the configured binding list is always `Add model...`.
+`/model` should first show configured model-provider bindings from effective configuration. These bindings may have been created by onboarding or defined directly in configuration files. Each row should use the binding display name as the primary label and may show provider and slug details as muted secondary text. The last row in the configured binding list is always `Add model...`.
 
 Selecting an existing configured binding does not immediately apply the final session model when the model supports reasoning. `/model` groups model and provider together as the configured binding step, then treats reasoning effort as a distinct follow-up step. If the selected model does not support reasoning, the configured binding can be applied immediately. If the user selects `Add model...`, `/model` enters the same add-model setup sequence as onboarding:
 
@@ -36,23 +36,24 @@ Selecting an existing configured binding does not immediately apply the final se
 5. When adding a provider, enter base URL.
 6. When adding a provider, enter API key.
 7. Enter the model name expected by the selected provider.
-8. Select invocation method when a new binding requires it.
-9. Select reasoning effort when the selected model supports reasoning.
-10. Apply the resulting model-provider binding and reasoning effort to future turns in the current session, persisting newly created provider or binding records before treating them as configured.
+8. Accept or edit the model display name shown in client interfaces.
+9. Select invocation method when a new binding requires it.
+10. Select reasoning effort when the selected model supports reasoning.
+11. Apply the resulting model-provider binding and reasoning effort to future turns in the current session, persisting newly created provider or binding records before treating them as configured.
 
 The interaction surface differs from onboarding. Onboarding may show a longer inline setup stack because it is the initial setup experience. `/model` is a focused slash-command workflow and should show only the current step directly below the composer, using the slash-command popup visual grammar from `L2-DES-TUI-003`. The slash-command surface occupies the same bottom region as the bottom status line, so while `/model` is visible the normal bottom status line is hidden. When the user confirms or submits a step, that step disappears and the next step replaces it in the same below-composer command area. Previously completed steps are retained in command state but are not rendered as visible inline history.
 
 ## UI Flow
 
-`/model` opens a transient command surface below the composer. The first surface is a configured model-provider binding list, not the supported-model slug selector. The configured binding list may show model and provider together, but it must not conflate reasoning effort into the binding-selection row. Discrete choices use the same searchable popup pattern as onboarding and the row layout rules from `L2-DES-TUI-003`: two-character left padding, active row primary foreground, inactive command/name text in normal foreground, and secondary details in muted foreground. Free-text values use a single active input prompt below the composer.
+`/model` opens a transient command surface below the composer. The first surface is a configured model-provider binding list, not the supported-model slug selector. The configured binding list may show binding display name and provider together, but it must not conflate reasoning effort into the binding-selection row. Discrete choices use the same searchable popup pattern as onboarding and the row layout rules from `L2-DES-TUI-003`: two-character left padding, active row primary foreground, inactive command/name text in normal foreground, and secondary details in muted foreground. Free-text values use a single active input prompt below the composer.
 
 ```text
 ┃ /model
 
-> deepseek-v4-pro   OpenRouter
-  gpt-5.5           OpenAI
-  claude-sonnet-5   Anthropic
-  Add model...
+> ● DeepSeek V4 Pro   OpenRouter
+    GPT 5.5           OpenAI
+    Claude Sonnet 5   Anthropic
+    Add model...
 ```
 
 Selecting an existing configured binding removes the binding list and shows the reasoning effort step when the selected model supports reasoning:
@@ -63,8 +64,8 @@ Selecting an existing configured binding removes the binding list and shows the 
   Reasoning Effort
   Hint: Choose the reasoning effort for gpt-5.5 through OpenAI.
 
-  > medium
-    high
+    medium
+  > ● high
     xhigh
 
   Enter: select and apply
@@ -122,6 +123,20 @@ When a free-text step is active, only that step is shown:
   Esc: back
 ```
 
+After model name entry, the display-name step lets the user accept the suggested label or edit it:
+
+```text
+┃ /model
+
+  Display Name
+  Hint: Enter the name clients should show for this model.
+
+  GPT 5.5
+
+  Enter: continue
+  Esc: back
+```
+
 When an invocation method is required for a new binding, the command surface replaces the previous step with the invocation selector:
 
 ```text
@@ -158,9 +173,11 @@ That stacked rail view belongs to onboarding. `/model` uses one active step at a
 
 - The configured model-provider binding list is the first `/model` step.
 - The configured binding list must be populated from effective configuration, including bindings created by onboarding and bindings defined directly in configuration files.
-- The configured binding list must show configured model-provider bindings and an `Add model...` row at the bottom. It may show provider identity in each row, but it must not include reasoning effort.
+- The configured binding list must show configured model-provider bindings and an `Add model...` row at the bottom. It must use the configured binding display name as the primary row label. It may show provider identity, model slug, or provider-specific model name as secondary details, but it must not include reasoning effort.
+- In configured binding and reasoning-effort lists, `>` marks the row currently focused by keyboard navigation and `●` marks the current active session selection. The same row may show both markers.
+- Add-model substeps that have no current enabled value may show `>` without `●`.
 - While any `/model` command surface is visible, the normal bottom status line must not be rendered because the command surface occupies that same area below the composer.
-- Pressing Enter on a highlighted configured binding records the selected model-provider binding in command-local state.
+- Pressing Enter on the focused configured binding marked by `>` records the selected model-provider binding in command-local state.
 - Reasoning effort selection is required after configured binding selection when the selected model supports reasoning, even when the binding already has a default or last-used reasoning effort.
 - If the selected configured binding's model does not support reasoning, the binding may be applied immediately after selection.
 - The final selection is applied only after the configured binding and any required reasoning effort step have completed.
@@ -168,12 +185,13 @@ That stacked rail view belongs to onboarding. `/model` uses one active step at a
 - Selecting an existing configured binding before the first user message may persist the default selected binding and reasoning effort according to application configuration rules, but it must not duplicate or rewrite unchanged provider and binding records.
 - Pressing Enter on `Add model...` removes the configured binding list and starts the add-model flow at supported model slug selection.
 - The model slug selector must support search or filtering by slug text.
-- Pressing Enter on a highlighted model slug confirms the slug, removes the model selector, and shows the provider step.
+- Pressing Enter on the focused model slug marked by `>` confirms the slug, removes the model selector, and shows the provider step.
 - The provider step must let the user choose an existing provider or add a provider.
 - If the user chooses to add a provider, `/model` prompts for provider name, base URL, and API key as separate current-step views below the composer.
 - API key entry must use hidden or masked input by default.
 - After provider selection or creation, `/model` prompts for the provider-specific model name.
-- Invocation method selection appears after model name entry and uses the same searchable selection pattern as onboarding.
+- After model name entry, `/model` prompts for the model display name used in client interfaces. The value should be prefilled from the supported model definition's display name.
+- Invocation method selection appears after display name entry and uses the same searchable selection pattern as onboarding.
 - If the selected model supports reasoning, reasoning effort selection appears after invocation method selection and uses the same searchable selection pattern as onboarding.
 - If the selected model does not support reasoning, the reasoning effort step is skipped.
 - Pressing Esc returns to the previous step when one exists; otherwise it cancels `/model` and clears the below-composer command surface.
@@ -216,3 +234,5 @@ That stacked rail view belongs to onboarding. `/model` uses one active step at a
 | 1 | 2026-05-25 | Human | Refinement | Split configured model, provider, and reasoning effort into distinct `/model` steps. |
 | 1 | 2026-05-25 | Human | Refinement | Grouped model and provider back into the configured binding selection while keeping reasoning effort separate. |
 | 1 | 2026-05-25 | Human | Refinement | Clarified that existing binding selection is session state after the first user message, while newly created provider or binding records require configuration persistence. |
+| 1 | 2026-05-26 | Human | Refinement | Added binding display names to configured model rows and to the add-model flow. |
+| 1 | 2026-05-26 | Human | Refinement | Updated `/model` choice-list marker semantics so `>` marks focus and `●` marks the active model or reasoning value. |

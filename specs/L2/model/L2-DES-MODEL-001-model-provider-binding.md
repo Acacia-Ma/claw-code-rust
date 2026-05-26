@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 ---
 
 # L2-DES-MODEL-001 — Model Provider Binding
@@ -19,7 +19,7 @@ Refine model and provider requirements into a data model that separates supporte
 
 The program supports models first. A supported model definition describes a model capability profile known by the program. Providers are user-defined connection entries because users may add OpenAI-compatible gateways, local endpoints, or other provider endpoints over time.
 
-The same supported model may be exposed by different providers under different model names. The invocation method can also differ by model-provider pair. Therefore invocation method belongs to the binding between a supported model and a user-defined provider, not to the provider itself.
+The same supported model may be exposed by different providers under different model names. The invocation method and user-facing display label can also differ by model-provider pair. Therefore invocation method and configurable model display name belong to the binding between a supported model and a user-defined provider, not to the provider itself.
 
 User providers and model-provider bindings are persisted through application configuration. Effective values are resolved from user-scoped and project-scoped configuration, with project-scoped configuration taking precedence for overlapping records.
 
@@ -42,7 +42,7 @@ The program should model invocation through three related data concepts:
 2. `UserProvider`
 3. `ModelProviderBinding`
 
-`ModelProviderBinding` is the invocable edge. It links one supported model capability profile to one user-defined provider and records the provider-specific model name, invocation method, and reasoning effort.
+`ModelProviderBinding` is the invocable edge. It links one supported model capability profile to one user-defined provider and records the provider-specific model name, configurable display name, invocation method, and reasoning effort.
 
 ## SupportedModelDefinition
 
@@ -51,7 +51,7 @@ The program should model invocation through three related data concepts:
 Required conceptual fields:
 
 - `canonical_model_slug`: stable program-known model slug, such as `openai/gpt-5.5`.
-- `display_name`: human-readable model name.
+- `display_name`: default human-readable model name used when a binding has no explicit display override.
 - `base_instructions`: model-specific base instruction text or reference.
 - `context_window`: total model context window where known.
 - `effective_context_window`: program-safe effective context window where known.
@@ -85,6 +85,7 @@ Required conceptual fields:
 
 - Canonical model slug.
 - Provider-specific model name.
+- Model display name.
 - Invocation method.
 - Reasoning effort.
 
@@ -100,9 +101,12 @@ Required conceptual fields:
 - `canonical_model_slug`: reference to `SupportedModelDefinition`.
 - `provider_id`: reference to `UserProvider`.
 - `model_name`: provider-specific model name used in API calls.
+- `display_name`: user-facing binding label shown in clients. It may be explicitly entered by the user or populated from the supported model definition when the binding is created.
 - `invocation_method`: API protocol or SDK adapter, such as OpenAI Responses, OpenAI Chat Completions, or Anthropic Messages.
 - `reasoning_effort`: configured default reasoning effort when the supported model permits reasoning.
 - `is_default`: optional default-selection marker where configuration policy supports it.
+
+`display_name` is mutable display metadata. It must not be used as a stable identifier, provider API model name, traceability key, or configuration reference. The stable references remain `binding_id`, `canonical_model_slug`, and `provider_id`; the provider request uses `model_name`.
 
 The binding must be valid only when:
 
@@ -119,6 +123,7 @@ Persistent model configuration conceptually stores:
 
 - User provider records.
 - Model-provider binding records.
+- Binding display names.
 - Default selected binding where supported.
 - Default reasoning effort where supported.
 
@@ -160,7 +165,7 @@ ResolvedModelProfile
 Provider request
 ```
 
-`ResolvedModelProfile` is a runtime-only profile for one model call. It combines capability metadata, provider connection details, binding details, and session selection state. It should not be treated as the durable source of truth.
+`ResolvedModelProfile` is a runtime-only profile for one model call. It combines capability metadata, provider connection details, binding details, effective display name, and session selection state. It should not be treated as the durable source of truth.
 
 ## Client Projection
 
@@ -169,6 +174,7 @@ Routine client views should receive model/provider/binding projections rather th
 Client projections may include:
 
 - Supported model slug and display name.
+- Configured binding display name.
 - Provider name.
 - Credential status.
 - Provider availability status.
@@ -201,3 +207,4 @@ Routine client projections must not include plaintext API keys by default.
 | 1 | 2026-05-25 | Human | Refinement | Clarified that binding reasoning effort is configured default state and session-local reasoning selection does not rewrite binding records by itself. |
 | 1 | 2026-05-25 | Human | Refinement | Linked provider and binding persistence to the concrete `config.toml` schema. |
 | 1 | 2026-05-25 | Human | Refinement | Clarified that provider credentials are stored in companion `auth.json` files, not inline in `config.toml`. |
+| 1 | 2026-05-26 | Human | Refinement | Added binding-level model display name as mutable UI metadata distinct from the canonical model slug and provider API model name. |

@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-25
+last_updated: 2026-05-26
 ---
 
 # L2-DES-TUI-CMD-004 — Slash Command: /resume
@@ -48,11 +48,11 @@ Devo Sessions
 
 Resume Session  2 / 8 · 33%
 
-  Title                       Session ID                            Updated
-  --------------------------  ------------------------------------  -----------------------
-  earlier investigation       019db434-c4b4-7c81-ba66-74c58f0fbd60  2026-05-24 22:13:01 UTC
-> active refactor             019db45d-61ec-7b02-894f-a847b78f7ac3  2026-05-25 04:09:44 UTC  current
-  release notes               019db467-c5ef-7127-9ffd-5e0d9393c3ac  2026-05-25 05:31:10 UTC
+    Title                     Session ID                            Updated
+    ------------------------  ------------------------------------  -----------------------
+    earlier investigation     019db434-c4b4-7c81-ba66-74c58f0fbd60  2026-05-24 22:13:01 UTC
+> ● active refactor           019db45d-61ec-7b02-894f-a847b78f7ac3  2026-05-25 04:09:44 UTC
+    release notes             019db467-c5ef-7127-9ffd-5e0d9393c3ac  2026-05-25 05:31:10 UTC
 
 ↑/↓ select  pgup/pgdn page  home/end jump
 enter resume  q back
@@ -60,8 +60,9 @@ enter resume  q back
 
 Rules:
 
-- The selected row is marked with `>`.
-- The current active session row is suffixed with `current`.
+- The focused row is marked with `>`.
+- The current active session row is marked with `●`.
+- If the focused row is also the current active session, both markers are shown.
 - The initial selection is the active session when present, otherwise the first row.
 - The list shows session title, stable session ID, updated timestamp, and progress through the list.
 - Long titles are truncated to fit the title column.
@@ -110,3 +111,4 @@ Keyboard behavior:
 | 1 | 2026-05-23 | Assistant | Initial | Initial `/resume` command design. |
 | 1 | 2026-05-25 | Human | Refinement | Requested alignment with the current `crates/tui` alternate-screen implementation. |
 | 1 | 2026-05-25 | Assistant | Refinement | Replaced the stale inline searchable-popup design with the current loading view, alternate-screen session browser, key bindings, worker flow, and session-switch restore behavior. |
+| 1 | 2026-05-26 | Human | Refinement | Updated session browser marker semantics so `>` marks focus and `●` marks the current active session. |

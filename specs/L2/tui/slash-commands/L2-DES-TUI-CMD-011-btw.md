@@ -28,7 +28,7 @@ Define the TUI behavior for `/btw`, which starts a side conversation inside an e
 Inline command rendering shows the command token in primary color and the parameter hint in muted color.
 
 ```text
-┃ /btw <your side conversation message>
+┃ /btw <side conversation message>
 
   Build · deepseek-v4-pro high  ↑0[cached 0 0%]  ↓0  ▱▱▱▱▱▱▱▱▱▱  0%  0/950k
 ```
@@ -38,8 +38,7 @@ Submission example:
 ```text
 ┃ /btw what if we solve this with a smaller parser-only change?
 
-⠋ Working · 18s
-  side      ephemeral fork running
+⠋ Working · ⏱ 18s
 ```
 
 ## State And Error Behavior

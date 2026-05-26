@@ -29,8 +29,6 @@ Define the TUI behavior for `/clear`, which clears the current TUI transcript vi
 
 ```text
 ┃ /clear
-
-  Transcript view cleared. Session history remains saved.
 ```
 
 Rules:

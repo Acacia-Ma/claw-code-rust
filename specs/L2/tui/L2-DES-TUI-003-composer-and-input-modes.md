@@ -1,6 +1,6 @@
 ---
 artifact_id: L2-DES-TUI-003
-revision: 1
+revision: 4
 status: Draft
 active_baseline: no
 supersedes:
@@ -32,6 +32,7 @@ Session-local input modes affect how the TUI interprets the next composer submis
 - `L1-REQ-AGENT-005` defines agent-level Plan Mode behavior.
 - `L1-REQ-TOOL-002` defines the command execution capability used by Shell Mode.
 - `L2-DES-TUI-002` defines the shell regions occupied by composer and status line.
+- `L2-DES-TUI-008` defines composer, popup, status-line, and slash-command style tokens.
 - `L2-DES-CLIENT-001` defines localization and Unicode readiness.
 
 ## Design Requirement
@@ -45,6 +46,20 @@ The TUI should support these session-local input modes:
 | Default Input Mode | Normal build/task input. | `Build` |
 | Shell Mode | Terminal command input routed to the program's command execution capability. | `Shell` |
 | Plan Mode | Plan-oriented input governed by agent-level Plan Mode behavior. | `Plan` |
+
+## Style System Boundary
+
+The composer owns input behavior and command interpretation. The visual treatment of the input band, slash-command rows, mode colors, popup spacing, selected rows, and status symbols should come from `L2-DES-TUI-008`.
+
+Composer-specific token use:
+
+- Input band background: `surface.inputBand`.
+- Empty hint: `text.muted`.
+- User-entered text: `text.primary`.
+- Prompt marker `┃`: `core.primary`.
+- Matched slash command token: `core.primary`.
+- Slash command parameter hint: `text.muted`.
+- Mode label colors: `mode.build`, `mode.plan`, and `mode.shell`.
 
 ## Composer Layout
 
@@ -110,7 +125,7 @@ The bottom status line has this conceptual shape:
 Fields:
 
 - `Build`, `Plan`, or `Shell`: current TUI input/work mode. `Build` is the normal default work-state label. `Plan` and `Shell` replace it when those session-local input modes are active.
-- `deepseek-v4-pro`: current model name or model slug.
+- `deepseek-v4-pro`: current model display name. The supported model slug is a fallback only for recovery or invalid configuration states where a display name is unavailable.
 - `high`: current reasoning effort.
 - `↑0[cached 0 0%]`: input token count, cached input token count, and input cache hit rate.
 - `↓0`: output token count.
@@ -173,7 +188,7 @@ TUI state:
 
 ┃ Running  cargo test parser::quoted
 
-⠋ Working · 2s
+⠋ Working · ⏱ 2s
 
 ┃ Ask Devo
 
@@ -213,12 +228,13 @@ Command discovery behavior:
 - `!` enters Shell Mode as defined above.
 - Slash command suggestions should appear directly below the composer prompt line.
 - The slash-command list has an eight-row visible height.
-- Slash command rows render with two-character left padding.
-- Up and Down arrow keys move the active selection.
-- Enter confirms the active selection.
+- Slash command rows render with a two-character prefix area: `> ` for the focused row and two spaces for non-focused rows.
+- Up and Down arrow keys move the focused selection marked by `>`.
+- Enter confirms the focused selection.
 - Esc closes suggestions and preserves typed input where safe.
-- The active row uses the theme primary foreground color for both the command name and description.
-- In inactive rows, the command name uses normal white foreground and the description uses muted foreground.
+- The focused row uses the theme primary foreground color for both the command name and description.
+- In non-focused rows, the command name uses normal white foreground and the description uses muted foreground.
+- Slash-command discovery rows normally do not use `●` because slash commands are actions rather than already enabled options.
 - Selecting a suggestion must either invoke the command or open the relevant flow.
 
 Open slash-command list:
@@ -226,7 +242,7 @@ Open slash-command list:
 ```text
 ┃ /
 
-  /theme        switch the UI theme
+> /theme        switch the UI theme
   /model        choose the active model
   /compact      compact the current session context
   /resume       resume a saved chat
@@ -248,7 +264,6 @@ Full slash-command list:
   /status       show current session configuration and token usage
   /permissions  choose what Devo is allowed to do
   /clear        clear the current transcript
-  /onboard      configure model provider connection
   /btw          start a side conversation in an ephemeral fork
   /exit         exit Devo
 ```
@@ -284,7 +299,6 @@ Command purposes:
 - `/status`: show current session configuration and token usage.
 - `/permissions`: choose what Devo is allowed to do.
 - `/clear`: clear the current transcript.
-- `/onboard`: configure model provider connection.
 - `/btw`: start a side conversation in an ephemeral fork.
 - `/exit`: exit Devo.
 
@@ -301,7 +315,6 @@ Command-specific L2 designs:
 | `/status` | `L2-DES-TUI-CMD-006` |
 | `/permissions` | `L2-DES-TUI-CMD-007` |
 | `/clear` | `L2-DES-TUI-CMD-008` |
-| `/onboard` | `L2-DES-TUI-CMD-009` |
 | `/btw` | `L2-DES-TUI-CMD-011` |
 | `/exit` | `L2-DES-TUI-CMD-012` |
 
@@ -330,6 +343,7 @@ Rules:
 | related-to | L1-REQ-AGENT-005 | 1 | specs/L1/L1-REQ-AGENT-005-plan-mode.md | Plan Mode input must trigger agent-level planning-only behavior. |
 | related-to | L1-REQ-TOOL-002 | 1 | specs/L1/L1-REQ-TOOL-002-tools.md | Shell Mode uses the built-in command execution capability. |
 | related-to | L2-DES-TUI-002 | 1 | specs/L2/tui/L2-DES-TUI-002-modern-tui-shell-layout.md | Defines the shell regions used by composer and status line. |
+| related-to | L2-DES-TUI-008 | 1 | specs/L2/tui/L2-DES-TUI-008-style.md | Defines composer band, popup list, slash-command, and status-line style rules. |
 | related-to | L2-DES-CLIENT-001 | 1 | specs/L2/client/L2-DES-CLIENT-001-localization-readiness.md | Defines shared Unicode and localization design constraints. |
 | specified-by | TBD | TBD | specs/L3/tui/TBD.md | L3 behavior has not been authored yet. |
 
@@ -349,3 +363,6 @@ Rules:
 | 1 | 2026-05-23 | Human | Refinement | Added `/goal` as the TUI entry point for Ralph Loop goals. |
 | 1 | 2026-05-25 | Human | Refinement | Clarified that `/goal <objective>` submits the following text as the objective without a default budget prompt. |
 | 1 | 2026-05-25 | Assistant | Refinement | Added composer-level handling guidance for direct `/goal` objective submission. |
+| 2 | 2026-05-26 | Assistant | Revision | Linked composer and command discovery visual treatment to the shared TUI style system. |
+| 3 | 2026-05-26 | Human | Refinement | Updated navigable slash-command lists so `>` marks the focused row and `●` is reserved for enabled options in choice lists. |
+| 4 | 2026-05-27 | Human | Refinement | Removed `/onboard` from slash-command discovery because onboarding is entered through startup CLI arguments. |

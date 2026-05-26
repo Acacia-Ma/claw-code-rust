@@ -6,7 +6,7 @@ active_baseline: no
 supersedes:
 superseded_by:
 owner: Human
-last_updated: 2026-05-22
+last_updated: 2026-05-26
 ---
 
 # L1-REQ-APP-010 — Configuration
@@ -45,7 +45,7 @@ The program must provide persistent application-level configuration for core use
 
 - The user must be able to configure default model and reasoning settings through onboarding and supported model-selection workflows.
 - Configuration information entered during onboarding must be persistently saved to a configuration file.
-- Onboarding-created model, provider, provider-specific model name, invocation method, and reasoning effort configuration must be restorable in later launches.
+- Onboarding-created model, provider, provider-specific model name, model display name, invocation method, and reasoning effort configuration must be restorable in later launches.
 - The program must support a project-scoped configuration file at `project_directory/.dev/config.toml`.
 - The program must support a user-scoped configuration file at `C:\Users\username\.devo\config.toml` on Windows.
 - The program must support a user-scoped configuration file at `~/.devo/config.toml` on macOS and Linux.
@@ -71,7 +71,7 @@ The program must provide persistent application-level configuration for core use
 ## Acceptance Criteria
 
 - Given a changed configuration value, when the user starts a later session, then the new value is applied.
-- Given onboarding completes with model provider information, when the program restarts, then the onboarding-entered configuration is loaded from persistent configuration without requiring the same setup again.
+- Given onboarding completes with model provider information, when the program restarts, then the onboarding-entered configuration, including the model display name, is loaded from persistent configuration without requiring the same setup again.
 - Given both `project_directory/.dev/config.toml` and the user-scoped configuration file define an overlapping setting, when the program computes effective configuration, then the project-scoped value takes precedence.
 - Given no project-scoped configuration file exists, when the user-scoped configuration file exists, then the program can load applicable settings from the user-scoped configuration file.
 - Given configuration is persisted from onboarding or model selection, when the user inspects effective configuration, then the user can understand the scope or source of the saved value where that distinction affects behavior.
@@ -119,3 +119,4 @@ The program must provide persistent application-level configuration for core use
 | 1 | 2026-05-22 | Human | Refinement | Clarified model and reasoning default behavior: onboarding and model-selection workflows configure defaults, active-session changes are sticky, and graceful server exit persists the current active session reasoning effort. |
 | 1 | 2026-05-22 | Human | Refinement | Added onboarding configuration persistence and project-over-user configuration file precedence. |
 | 1 | 2026-05-25 | Human | Refinement | Renamed configurable approval posture to permission policy and kept sandbox behavior as a separate configuration concern. |
+| 1 | 2026-05-26 | Human | Refinement | Added persisted model display name as part of onboarding-created model binding configuration. |

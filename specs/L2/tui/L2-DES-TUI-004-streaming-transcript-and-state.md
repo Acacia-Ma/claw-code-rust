@@ -1,12 +1,12 @@
 ---
 artifact_id: L2-DES-TUI-004
-revision: 1
+revision: 5
 status: Draft
 active_baseline: no
 supersedes:
 superseded_by:
 owner: Assistant
-last_updated: 2026-05-25
+last_updated: 2026-05-27
 ---
 
 # L2-DES-TUI-004 — Streaming Transcript And State
@@ -25,6 +25,7 @@ The TUI must show progress while work is happening and preserve a readable audit
 - `L1-REQ-TUI-003` requires a durable, readable, scrollable transcript.
 - `L1-REQ-TUI-004` requires visible idle, generating, tool, waiting, interrupted, failed, completed, background process, and input-mode states.
 - `L1-REQ-TUI-007` requires stable layout during streaming and resize.
+- `L1-REQ-AGENT-003` requires visible task planning with status updates.
 - `L1-REQ-CLIENT-002` requires active and restored sessions to render with a consistent visual and stylistic language.
 - `L1-REQ-APP-004` requires actionable diagnostics.
 - `L1-REQ-TOOL-005` requires visibility and manual stop access for background processes.
@@ -34,6 +35,7 @@ The TUI must show progress while work is happening and preserve a readable audit
 - `L2-DES-APP-004` defines observability fields used by diagnostic display.
 - `L2-DES-CONTEXT-002` defines compaction lifecycle records and user-visible compaction notices.
 - `L2-DES-TUI-007` defines the shared live/replay transcript projection boundary used by TUI renderers.
+- `L2-DES-TUI-008` defines the shared TUI style system for transcript markers, cell colors, symbols, and spinner animation.
 
 ## Design Requirement
 
@@ -72,7 +74,7 @@ Compact shell placement:
 ┃ I will patch the parser and run the focused suite.
 ┃ Running  cargo test parser::quoted -- --nocapture
 
-⠋ Working · 12s
+⠋ Working · ⏱ 12s
 
 <composer>
 ┃ Ask Devo
@@ -115,6 +117,8 @@ The transcript area is a vertical list of cells. Cells fall into three main cate
 3. Tool message cells.
 
 The left marker `┃` is the main visual anchor for transcript cells. For assistant and tool cells, it marks the first visible line of a logical cell. For user-message cells, which are background-band surfaces, it may repeat on each user-authored content line when the message has multiple lines. The marker column should align consistently across transcript content, use color to distinguish role/state, and remain readable without color.
+
+Transcript cells should consume the symbols and tokens defined by `L2-DES-TUI-008`. This document owns cell behavior and lifecycle mapping; the style system owns which semantic tokens and glyphs are used for markers, reasoning, tool titles, diff lines, folded output, approval states, plan states, and live spinners.
 
 ### User Message Cells
 
@@ -207,6 +211,173 @@ Rules:
 - `DeepSeek V4 Pro` is the display model name.
 - `2.1s` is total turn duration.
 - The summary appears only after completion and should not duplicate the live working indicator.
+
+## Plan Cell Visual Design
+
+The plan tool produces visible to-do state. In the TUI, plan state is not rendered as an ordinary raw tool-result cell. The TUI should project plan updates into a dedicated plan surface and, when useful, a durable inline plan update cell.
+
+This design follows the mature-agent UI pattern observed during investigation:
+
+- The model-facing todo tool is displayed to users as `Plan`.
+- Completed todo tool calls are suppressed as ordinary tool-result cells unless they fail.
+- Todo tool input is converted into a session-level plan update as soon as the tool input is complete.
+- The latest plan state is persisted separately from normal message text and restored with the session.
+- A pinned plan surface may appear above the composer when the plan is active.
+
+### Plan Data
+
+Conceptual plan item fields for rendering:
+
+- `id`: stable item id.
+- `content`: user-visible item text.
+- `status`: `pending`, `in_progress`, `completed`, `blocked`, or `canceled`.
+- `priority`: optional `high`, `medium`, or `low`.
+
+The renderer should treat the plan as user-visible state, not hidden reasoning. Plan text should be concise and action-oriented.
+
+### Pinned Plan Surface
+
+When plan display mode is pinned, an active plan appears between the transcript viewport and the composer. It is a compact state surface, not a transcript message.
+
+Pinned plan example:
+
+```text
+  Plan · 1/4
+┃ ● Patch quoted value parsing
+┃ ○ Add escaped quote regression
+┃ ○ Run focused parser tests
+┃ ○ Summarize result
+```
+
+Rules:
+
+- The header uses `Plan · completed/total`.
+- The completed count includes items with `completed` status.
+- The pinned surface is hidden when the plan is empty.
+- The pinned surface should hide when every item is completed, unless the user is explicitly viewing plan history.
+- The pinned surface should show at most six item rows by default.
+- If more than six items exist, choose a six-item window centered around the first `in_progress` item. If none is in progress, center around the first `pending` item. If neither exists, start at the first item.
+- Hidden items are summarized with a muted line such as `… 3 more, Ctrl+T to view all`.
+- The pinned surface uses a left structural marker or border aligned with the transcript marker column. It should not be boxed on all sides.
+
+### Plan Item Rendering
+
+Plan item markers:
+
+| Status | Marker | Text Style |
+|---|---|---|
+| `pending` | `○` | Muted foreground. |
+| `in_progress` | `●` | Primary or normal foreground. |
+| `completed` | `✓` | Muted or success marker, strikethrough text where supported. |
+| `blocked` | `⚠` | Warning marker, concise blocker text. |
+| `canceled` | `✗` | Muted or error marker depending on cause. |
+
+Rules:
+
+- Exactly one item should normally be `in_progress`; if the server projects multiple in-progress items for parallel work, the UI may show multiple `●` items.
+- Completed items may be shown in the pinned window only when needed to preserve local context around the active item.
+- Priority should not dominate the line. If shown, it should be a short muted suffix or small badge, not a second marker system.
+- Long plan item text wraps under the content column, not under the marker.
+
+### Inline Plan Update Cell
+
+When plan display mode is inline, or when the transcript needs durable evidence of a plan change, the plan update renders as a transcript cell.
+
+Inline example:
+
+```text
+┃ Plan · 1/4
+  ┗ ● Patch quoted value parsing
+    ○ Add escaped quote regression
+    ○ Run focused parser tests
+    ○ Summarize result
+```
+
+Rules:
+
+- Inline plan updates use the ordinary transcript marker `┃`.
+- The first line carries the header `Plan · completed/total`.
+- Item rows are indented under the content column.
+- The `┗` relationship marker should connect the header to the first item row.
+- Inline plan updates are durable review content and should replay through the same renderer as live plan updates.
+- Repeated plan updates should be compact. If an update changes only statuses, the UI may show a concise `Plan updated · completed/total` summary in normal transcript flow while the pinned surface shows the full active plan.
+
+### Failed Plan Update
+
+If the plan tool fails, the TUI should show a normal tool/error cell instead of silently suppressing the result.
+
+```text
+┃ Plan update failed                         invalid input
+  expected  items with content and status
+```
+
+Rules:
+
+- Failed plan updates must be visible.
+- The error should identify whether parsing, validation, persistence, or server projection failed.
+- The failed plan update must not replace the last known good plan state.
+
+### Plan Cell Examples
+
+Pinned active plan:
+
+```text
+  Plan · 1/4
+┃ ✓ Inspect existing parser branch
+┃ ● Patch quoted value parsing
+┃ ○ Add escaped quote regression
+┃ ○ Run focused parser tests
+```
+
+Pinned active plan with overflow:
+
+```text
+  Plan · 2/9
+┃ ✓ Inspect parser entry points
+┃ ✓ Identify failing escape branch
+┃ ● Patch quoted value parsing
+┃ ○ Add escaped quote regression
+┃ ○ Run focused parser tests
+┃ ○ Update transcript design notes
+  … 3 more, Ctrl+T to view all
+```
+
+Inline plan update in transcript flow:
+
+```text
+┃ Plan · 2/4
+  ┗ ✓ Inspect existing parser branch
+    ✓ Identify failing escape branch
+    ● Patch quoted value parsing
+    ○ Run focused parser tests
+```
+
+Inline compact status-only update:
+
+```text
+┃ Plan updated · 3/4
+  ┗ current  Run focused parser tests
+```
+
+Blocked plan item:
+
+```text
+  Plan · 2/5
+┃ ✓ Inspect provider usage fields
+┃ ✓ Check OpenAI chat completions mapping
+┃ ⚠ Confirm whether reasoning tokens are reported separately
+┃ ○ Update session metadata requirements
+┃ ○ Re-run traceability check
+```
+
+Completed plan hidden from pinned surface:
+
+```text
+  Plan · 4/4
+  all items complete
+```
+
+The completed-only form should appear only in explicit plan history, status, or full transcript review surfaces. The normal pinned surface should disappear after every item is completed.
 
 ## Tool Message Visual Design
 
@@ -334,7 +505,7 @@ When the current turn has not completed, the TUI should show a live working indi
 Example:
 
 ```text
-⠋ Working · 12s
+⠋ Working · ⏱ 12s
 
 ┃ Ask Devo
 ```
@@ -343,7 +514,7 @@ Rules:
 
 - The left side is an animated spinner using this frame sequence: `⠋`, `⠙`, `⠹`, `⠸`, `⠼`, `⠴`, `⠦`, `⠧`, `⠇`, `⠏`.
 - The text `Working` identifies the active turn state.
-- A dot separates the state from elapsed time.
+- A dot separates the state from elapsed time, and the elapsed value is prefixed by `⏱`.
 - Elapsed time is compact and may use seconds, minutes, hours, or days, such as `12s`, `3m`, `2h`, or `1d`.
 - The working indicator is live-only and disappears when the turn completes.
 - After completion, the completed-turn summary replaces the need for the working indicator.
@@ -414,6 +585,7 @@ The TUI should map canonical server events into visible state.
 | `tool_call_started` | Tool row appears even before final output exists. |
 | `tool_call_updated` | Tool progress/output preview updates. |
 | `tool_call_completed` | Tool result summary and status become durable review content. |
+| `plan_updated` | Pinned plan surface and/or inline plan update cell refreshes. |
 | `approval.requested` | Approval prompt appears and bottom status shows waiting reason. |
 | `question.requested` | Question prompt appears and bottom status shows waiting for answer. |
 | `background_process_updated` | Background process strip and transcript state update. |
@@ -461,7 +633,7 @@ The active work strip should summarize the most important current state without 
 Examples:
 
 ```text
-⠋ Working · 12s
+⠋ Working · ⏱ 12s
   running   cargo test parser::quoted         output +24 lines
   waiting   approval for apply_patch          modifies 2 files
   context   81% near limit                    compaction available
@@ -516,6 +688,7 @@ Rules:
 | refines | L1-REQ-TUI-003 | 1 | specs/L1/L1-REQ-TUI-003-transcript.md | Defines transcript cell types, review behavior, folding, and durable/live reconciliation. |
 | refines | L1-REQ-TUI-004 | 1 | specs/L1/L1-REQ-TUI-004-state-visibility.md | Defines visible state mapping for idle, generating, tools, approvals, questions, failures, interruptions, and background processes. |
 | related-to | L1-REQ-TUI-007 | 1 | specs/L1/L1-REQ-TUI-007-responsive-layout-readability.md | Streaming and transcript rendering must remain stable across resize and narrow widths. |
+| related-to | L1-REQ-AGENT-003 | 1 | specs/L1/L1-REQ-AGENT-003-task-planning.md | Plan updates are rendered as visible task state. |
 | related-to | L1-REQ-CLIENT-002 | 1 | specs/L1/L1-REQ-CLIENT-002-session-rendering-consistency.md | Live transcript cells and restored transcript cells must share the same projection and renderer boundary. |
 | related-to | L1-REQ-TOOL-005 | 1 | specs/L1/L1-REQ-TOOL-005-background-process-management.md | Background process state and stop controls are rendered in the TUI. |
 | related-to | L1-REQ-APP-004 | 1 | specs/L1/L1-REQ-APP-004-observability.md | User-facing diagnostics and waiting reasons inform state display. |
@@ -526,6 +699,7 @@ Rules:
 | related-to | L2-DES-CONTEXT-002 | 1 | specs/L2/context/L2-DES-CONTEXT-002-context-compaction.md | Compaction lifecycle records render as transcript-area status cells. |
 | related-to | L2-DES-TUI-006 | 1 | specs/L2/tui/L2-DES-TUI-006-full-transcript-alternate-screen.md | Defines full transcript alternate-screen projection, live-tail sync, and pager controls. |
 | related-to | L2-DES-TUI-007 | 1 | specs/L2/tui/L2-DES-TUI-007-session-rendering-consistency.md | Defines the shared live/replay projection and renderer boundary for transcript cells. |
+| related-to | L2-DES-TUI-008 | 1 | specs/L2/tui/L2-DES-TUI-008-style.md | Defines shared transcript, tool, diff, approval, spinner, and state styling. |
 | specified-by | TBD | TBD | specs/L3/tui/TBD.md | L3 behavior has not been authored yet. |
 
 ## Revision Notes
@@ -543,3 +717,7 @@ Rules:
 | 1 | 2026-05-25 | Human | Refinement | Added exact transcript-area labels for manual compaction start, automatic compaction start, and compaction completion. |
 | 1 | 2026-05-25 | Assistant | Refinement | Linked `Ctrl+T` full transcript review to `L2-DES-TUI-006`. |
 | 1 | 2026-05-25 | Assistant | Refinement | Linked transcript rendering to the shared live/replay projection boundary in `L2-DES-TUI-007`. |
+| 2 | 2026-05-26 | Assistant | Revision | Linked transcript cell visual treatment to the shared TUI style system. |
+| 3 | 2026-05-26 | Assistant | Revision | Added concrete Plan cell and pinned plan UI design based on observed TodoWrite-to-plan projection behavior. |
+| 4 | 2026-05-26 | Assistant | Revision | Added explicit Plan cell examples for pinned, overflow, inline, compact, blocked, and completed-only states. |
+| 5 | 2026-05-27 | Human | Refinement | Added the `⏱` symbol before elapsed time in live working and active work indicators. |
