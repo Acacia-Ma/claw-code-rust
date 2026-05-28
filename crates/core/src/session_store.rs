@@ -11,11 +11,8 @@ use crate::durable_record::DurableRecord;
 #[async_trait]
 pub trait SessionStore: Send + Sync {
     /// Append one durable record. Blocks until the record is durable (fsync'd or batched).
-    async fn append(
-        &self,
-        session_id: SessionId,
-        record: DurableRecord,
-    ) -> Result<u64, StoreError>;
+    async fn append(&self, session_id: SessionId, record: DurableRecord)
+    -> Result<u64, StoreError>;
 
     /// Replay all records for a session, optionally from a byte offset.
     async fn replay(
@@ -32,9 +29,18 @@ pub trait SessionStore: Send + Sync {
 }
 
 /// A stream of replayed durable records.
+#[derive(Debug)]
 pub struct ReplayStream {
-    // Implementation details deferred to L3-BEH-CORE-001 replay algorithm.
-    _private: (),
+    pub(crate) records: Vec<crate::durable_record::DurableRecord>,
+    pub(crate) position: usize,
+}
+
+impl ReplayStream {
+    pub async fn collect(&mut self) -> Vec<crate::durable_record::DurableRecord> {
+        let remaining = self.records.split_off(self.position);
+        self.position = self.records.len();
+        remaining
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -95,7 +101,10 @@ mod tests {
             "session_not_found"
         );
         assert_eq!(StoreErrorCode::FileCorrupted.to_string(), "file_corrupted");
-        assert_eq!(StoreErrorCode::PermissionDenied.to_string(), "permission_denied");
+        assert_eq!(
+            StoreErrorCode::PermissionDenied.to_string(),
+            "permission_denied"
+        );
     }
 
     #[test]
@@ -109,8 +118,7 @@ mod tests {
         ];
         for code in &codes {
             let json = serde_json::to_string(code).expect("serialize");
-            let restored: StoreErrorCode =
-                serde_json::from_str(&json).expect("deserialize");
+            let restored: StoreErrorCode = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(restored, *code);
         }
     }

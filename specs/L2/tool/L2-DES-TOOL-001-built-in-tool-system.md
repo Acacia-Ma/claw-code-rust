@@ -373,8 +373,8 @@ Live server-client events may be more frequent than durable records, but replay 
 | related-to | L2-DES-CONV-001 | 1 | specs/L2/conv/L2-DES-CONV-001-session-jsonl-data-model.md | Durable records preserve tool and plan state. |
 | related-to | L2-DES-GOAL-001 | 1 | specs/L2/goal/L2-DES-GOAL-001-ralph-loop-goals.md | Defines goal status transitions exposed through the goal update tool. |
 | related-to | L2-DES-TOOL-002 | 1 | specs/L2/tool/L2-DES-TOOL-002-parallel-tool-orchestration.md | Refines explicit `multi_tool_use` child scheduling, visibility, aggregation, and cancellation. |
-| specified-by | L3-BEH-TOOLS-001 | 1 | specs/L3/tools/L3-BEH-TOOLS-001-tool-contracts.md | L3 defines pure tool contracts and registry traits. |
-| specified-by | L3-BEH-CORE-003 | 1 | specs/L3/core/L3-BEH-CORE-003-tool-handlers.md | L3 defines built-in handler implementations and registry construction. |
+| specified-by | L3-BEH-TOOLS-001 | 2 | specs/L3/tools/L3-BEH-TOOLS-001-tool-contracts.md | L3 defines pure tool contracts and registry traits. |
+| specified-by | L3-BEH-CORE-003 | 2 | specs/L3/core/L3-BEH-CORE-003-tool-handlers.md | L3 defines built-in handler implementations and registry construction. |
 
 ## Revision Notes
 

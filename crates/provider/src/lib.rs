@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod error;
 pub mod openai;
 mod provider;
 mod request;

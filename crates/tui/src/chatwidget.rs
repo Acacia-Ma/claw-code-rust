@@ -424,7 +424,7 @@ impl ChatWidget {
             SlashCommand::Resume => "session",
             SlashCommand::Permissions => "permissions",
             SlashCommand::Diff => "diff",
-            SlashCommand::Exit | SlashCommand::Status | SlashCommand::Clear | SlashCommand::Btw => {
+            SlashCommand::Goal | SlashCommand::Exit | SlashCommand::Status | SlashCommand::Clear | SlashCommand::Btw => {
                 return;
             }
         };
@@ -2477,6 +2477,12 @@ impl ChatWidget {
                 } else {
                     self.set_status_message("No active turn to steer");
                 }
+            }
+            SlashCommand::Goal => {
+                self.set_status_message("Goal management");
+                self.add_to_history(PlainHistoryCell::new(vec![Line::from(
+                    "Use /goal to view or manage the active goal. See goal/create, goal/pause, goal/resume in the protocol.",
+                )]));
             }
             SlashCommand::Diff => {
                 self.set_status_message("Computing diff");

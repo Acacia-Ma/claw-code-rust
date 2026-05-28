@@ -506,6 +506,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
             },
             ToolHandlerKind::ShellCommand,
         );
@@ -520,6 +523,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
                 preparation_feedback: ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
             },
             ToolHandlerKind::Bash,
         );
@@ -535,6 +541,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::ReadFiles],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Read,
     );
@@ -549,6 +558,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::WriteFiles],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::LiveOnly,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Write,
     );
@@ -564,6 +576,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Glob,
     );
@@ -578,6 +593,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Grep,
     );
@@ -592,6 +610,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::WriteFiles],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::LiveOnly,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::ApplyPatch,
     );
@@ -606,6 +627,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Plan,
     );
@@ -622,6 +646,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Question,
     );
@@ -637,6 +664,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Task,
     );
@@ -653,6 +683,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::NetworkAccess],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::WebFetch,
     );
@@ -667,6 +700,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::NetworkAccess],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::WebSearch,
     );
@@ -681,6 +717,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Skill,
     );
@@ -697,6 +736,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Lsp,
     );
@@ -712,6 +754,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         },
         ToolHandlerKind::Invalid,
     );
@@ -729,6 +774,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
             },
             ToolHandlerKind::ExecCommand,
         );
@@ -744,6 +792,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
             },
             ToolHandlerKind::WriteStdin,
         );

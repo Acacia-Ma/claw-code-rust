@@ -1606,6 +1606,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let deny_checker = PermissionChecker::new(|request| {
@@ -2102,6 +2105,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2156,6 +2162,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2209,6 +2218,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2265,6 +2277,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2323,6 +2338,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));
@@ -2401,6 +2419,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = Arc::new(builder.build());
         let runtime = ToolRuntime::new_without_permissions(Arc::clone(&registry));

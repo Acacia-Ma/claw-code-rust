@@ -1,4 +1,5 @@
 // New modules
+pub mod deferred_loading;
 pub mod errors;
 pub mod events;
 pub mod handler_kind;
@@ -19,6 +20,7 @@ mod read;
 mod shell_exec;
 
 // New re-exports
+pub use deferred_loading::*;
 pub use errors::*;
 pub use events::*;
 pub use handler_kind::ToolHandlerKind;
@@ -42,7 +44,7 @@ pub fn create_default_tool_registry() -> registry::ToolRegistry {
 mod tests {
     use super::*;
 
-    fn expected_tool_names_default() -> [&'static str; 16] {
+    fn expected_tool_names_default() -> [&'static str; 17] {
         [
             "bash",
             "read",
@@ -60,6 +62,7 @@ mod tests {
             "update_plan",
             "exec_command",
             "write_stdin",
+            "ToolSearch",
         ]
     }
 

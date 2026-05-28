@@ -623,6 +623,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         builder.register_handler("write_tool", Arc::new(WriteTool));
         builder.push_spec(ToolSpec {
@@ -634,6 +637,9 @@ mod tests {
             capability_tags: vec![ToolCapabilityTag::WriteFiles],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         builder.register_handler("delayed_read_tool", Arc::new(DelayedReadTool));
         builder.push_spec(ToolSpec {
@@ -645,6 +651,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         Arc::new(builder.build())
     }
@@ -1047,6 +1056,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         Arc::new(builder.build())
     }

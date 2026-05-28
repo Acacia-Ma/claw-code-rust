@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use devo_protocol::ToolDefinition;
 
+use crate::deferred_loading::{
+    DeferredLoadingConfig, DeferredToolPrompt, LoadedDeferredTools, assemble_deferred_tool_prompt,
+    execute_tool_search,
+};
 use crate::errors::ToolDispatchError;
 use crate::invocation::{ToolInvocation, ToolOutput};
 use crate::tool_handler::ToolHandler;
@@ -15,6 +20,7 @@ pub struct ToolRegistry {
     pub(crate) specs: Vec<ToolSpec>,
     pub(crate) spec_index: HashMap<String, usize>,
     pub(crate) unified_exec_store: Option<Arc<ProcessStore>>,
+    pub(crate) loaded_deferred_tools: Arc<Mutex<LoadedDeferredTools>>,
 }
 
 impl ToolRegistry {
@@ -24,6 +30,7 @@ impl ToolRegistry {
             specs: Vec::new(),
             spec_index: HashMap::new(),
             unified_exec_store: None,
+            loaded_deferred_tools: Arc::new(Mutex::new(LoadedDeferredTools::default())),
         }
     }
 
@@ -80,6 +87,43 @@ impl ToolRegistry {
                 output_schema: unified_exec_output_schema(&spec.name),
             })
             .collect()
+    }
+
+    pub fn deferred_tool_prompt(
+        &self,
+        session_id: &str,
+        loaded_tools: &LoadedDeferredTools,
+        config: &DeferredLoadingConfig,
+    ) -> DeferredToolPrompt {
+        assemble_deferred_tool_prompt(
+            &self.tool_definitions(),
+            &loaded_tools.list_loaded(session_id),
+            config,
+        )
+    }
+
+    pub fn load_deferred_tools(
+        &self,
+        session_id: &str,
+        config: &DeferredLoadingConfig,
+        query: &str,
+    ) -> Result<String, String> {
+        let mut loaded_tools = self
+            .loaded_deferred_tools
+            .lock()
+            .map_err(|_| "loaded deferred tool state lock poisoned".to_string())?;
+        execute_tool_search(
+            query,
+            &self.tool_definitions(),
+            &mut loaded_tools,
+            session_id,
+            config,
+        )
+        .map(|result| result.summary())
+    }
+
+    pub fn loaded_deferred_tools(&self) -> Arc<Mutex<LoadedDeferredTools>> {
+        Arc::clone(&self.loaded_deferred_tools)
     }
 
     pub fn all_handlers(&self) -> impl Iterator<Item = (&String, &Arc<dyn ToolHandler>)> {
@@ -228,6 +272,7 @@ pub struct ToolRegistryBuilder {
     specs: Vec<ToolSpec>,
     spec_index: HashMap<String, usize>,
     unified_exec_store: Option<Arc<ProcessStore>>,
+    loaded_deferred_tools: Arc<Mutex<LoadedDeferredTools>>,
 }
 
 impl ToolRegistryBuilder {
@@ -237,6 +282,7 @@ impl ToolRegistryBuilder {
             specs: Vec::new(),
             spec_index: HashMap::new(),
             unified_exec_store: None,
+            loaded_deferred_tools: Arc::new(Mutex::new(LoadedDeferredTools::default())),
         }
     }
 
@@ -254,12 +300,32 @@ impl ToolRegistryBuilder {
         self.unified_exec_store = Some(store);
     }
 
+    pub fn set_loaded_deferred_tools(&mut self, loaded_tools: Arc<Mutex<LoadedDeferredTools>>) {
+        self.loaded_deferred_tools = loaded_tools;
+    }
+
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.specs
+            .iter()
+            .map(|spec| ToolDefinition {
+                name: spec.name.clone(),
+                description: spec.description.clone(),
+                input_schema: unified_exec_input_schema(
+                    &spec.name,
+                    spec.input_schema.to_json_value(),
+                ),
+                output_schema: unified_exec_output_schema(&spec.name),
+            })
+            .collect()
+    }
+
     pub fn build(self) -> ToolRegistry {
         ToolRegistry {
             handlers: self.handlers,
             specs: self.specs,
             spec_index: self.spec_index,
             unified_exec_store: self.unified_exec_store,
+            loaded_deferred_tools: self.loaded_deferred_tools,
         }
     }
 }
@@ -311,6 +377,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = builder.build();
         assert!(registry.get("echo").is_some());
@@ -330,12 +399,125 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = builder.build();
         let defs = registry.tool_definitions();
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].name, "echo");
         assert_eq!(defs[0].description, "test");
+    }
+
+    #[test]
+    fn registry_builds_deferred_tool_prompt() {
+        use pretty_assertions::assert_eq;
+
+        let mut builder = ToolRegistryBuilder::new();
+        for name in ["read", "ToolSearch", "web_search"] {
+            builder.push_spec(ToolSpec {
+                name: name.into(),
+                description: format!("{name} description"),
+                input_schema: JsonSchema::object(Default::default(), None, None),
+                output_mode: ToolOutputMode::Text,
+                execution_mode: ToolExecutionMode::ReadOnly,
+                capability_tags: vec![],
+                supports_parallel: true,
+                preparation_feedback: ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
+            });
+        }
+        let registry = builder.build();
+        let loaded_tools = LoadedDeferredTools::default();
+
+        let prompt = registry.deferred_tool_prompt(
+            "session-1",
+            &loaded_tools,
+            &DeferredLoadingConfig::default(),
+        );
+
+        assert_eq!(
+            prompt
+                .exposed
+                .iter()
+                .map(|tool| &tool.name)
+                .collect::<Vec<_>>(),
+            vec!["read", "ToolSearch"]
+        );
+        assert_eq!(
+            prompt
+                .deferred
+                .iter()
+                .map(|tool| &tool.name)
+                .collect::<Vec<_>>(),
+            vec!["web_search"]
+        );
+    }
+
+    #[test]
+    fn registry_loads_deferred_tools_for_session() {
+        let mut builder = ToolRegistryBuilder::new();
+        for name in ["read", "ToolSearch", "web_search"] {
+            builder.push_spec(ToolSpec {
+                name: name.into(),
+                description: format!("{name} description"),
+                input_schema: JsonSchema::object(Default::default(), None, None),
+                output_mode: ToolOutputMode::Text,
+                execution_mode: ToolExecutionMode::ReadOnly,
+                capability_tags: vec![],
+                supports_parallel: true,
+                preparation_feedback: ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
+            });
+        }
+        let registry = builder.build();
+
+        let summary = registry
+            .load_deferred_tools(
+                "session-1",
+                &DeferredLoadingConfig::default(),
+                "select:WebSearch",
+            )
+            .expect("deferred tool should load");
+
+        assert_eq!(summary, "Loaded 1 tool(s): web_search");
+        let loaded_tools = registry.loaded_deferred_tools();
+        let loaded_tools = loaded_tools.lock().expect("loaded tool state");
+        assert!(loaded_tools.is_loaded("session-1", "web_search"));
+    }
+
+    #[tokio::test]
+    async fn default_registry_dispatches_tool_search_and_records_loaded_tool() {
+        use crate::ToolContent;
+
+        let registry = crate::handlers::build_registry_from_plan(&crate::ToolPlanConfig::default());
+        let invocation = ToolInvocation {
+            call_id: ToolCallId("tool-search-1".into()),
+            tool_name: ToolName("ToolSearch".into()),
+            session_id: "session-1".into(),
+            cwd: PathBuf::from("/tmp"),
+            input: serde_json::json!({"query": "select:web_search"}),
+        };
+
+        let output = registry
+            .dispatch("ToolSearch", invocation)
+            .await
+            .expect("ToolSearch dispatch should succeed");
+        assert!(!output.is_error());
+        let content = output.to_content();
+
+        match content {
+            ToolContent::Text(text) => assert_eq!(text, "Loaded 1 tool(s): websearch"),
+            other => panic!("expected text output, got {other:?}"),
+        }
+        let loaded_tools = registry.loaded_deferred_tools();
+        let loaded_tools = loaded_tools.lock().expect("loaded deferred tools");
+        assert!(loaded_tools.is_loaded("session-1", "websearch"));
     }
 
     #[test]
@@ -350,6 +532,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
 
         let registry = builder.build();
@@ -370,6 +555,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
 
         let registry = builder.build();
@@ -428,6 +616,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = builder.build();
         assert!(registry.supports_parallel("read"));
@@ -454,6 +645,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         builder.register_handler("write", Arc::new(EchoHandler));
         builder.push_spec(ToolSpec {
@@ -465,6 +659,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = builder.build();
         assert!(registry.is_read_only("read"));
@@ -485,6 +682,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: false,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = builder.build();
         let spec = registry.spec("tool");
@@ -512,6 +712,9 @@ mod tests {
             capability_tags: vec![],
             supports_parallel: true,
             preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
         });
         let registry = builder.build();
         let invocation = ToolInvocation {

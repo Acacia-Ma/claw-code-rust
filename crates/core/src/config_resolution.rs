@@ -295,8 +295,14 @@ mod tests {
 
     #[test]
     fn diagnostic_severity_levels() {
-        assert!(matches!(DiagnosticSeverity::Error, DiagnosticSeverity::Error));
-        assert!(matches!(DiagnosticSeverity::Warning, DiagnosticSeverity::Warning));
+        assert!(matches!(
+            DiagnosticSeverity::Error,
+            DiagnosticSeverity::Error
+        ));
+        assert!(matches!(
+            DiagnosticSeverity::Warning,
+            DiagnosticSeverity::Warning
+        ));
         assert!(matches!(DiagnosticSeverity::Info, DiagnosticSeverity::Info));
     }
 }

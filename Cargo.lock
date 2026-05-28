@@ -783,6 +783,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "devo-skills"
+version = "0.1.10"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
 name = "devo-tasks"
 version = "0.1.10"
 dependencies = [
