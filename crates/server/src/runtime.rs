@@ -39,9 +39,9 @@ use devo_core::history::compaction::compact_history;
 use devo_core::history::summarizer::DefaultHistorySummarizer;
 use devo_core::message_to_response_items;
 use devo_core::query;
+use devo_core::tools::ToolRuntime;
+use devo_core::tools::{PermissionChecker, ToolPermissionRequest, ToolRuntimeContext};
 use devo_safety::PermissionMode;
-use devo_tools::ToolRuntime;
-use devo_tools::{PermissionChecker, ToolPermissionRequest, ToolRuntimeContext};
 
 use crate::ApprovalDecisionValue;
 use crate::ApprovalRequestPayload;
@@ -108,10 +108,13 @@ use crate::db::SessionStats;
 use crate::execution::PendingApproval;
 use crate::execution::RuntimeSession;
 use crate::execution::ServerRuntimeDependencies;
+use crate::goal::{CreateGoalParams, GoalAction, GoalId, GoalMutation};
 use crate::persistence::RolloutStore;
 use crate::persistence::build_item_record;
 use crate::persistence::build_turn_record;
 use crate::projection::history_item_from_turn_item;
+use crate::runtime::handlers::goal::{GoalProjection, GoalStore};
+use crate::subagent::{AgentRegistry, SpawnAgentParams, SubagentMetadata, SubagentStatus};
 use crate::titles::build_title_generation_request;
 use crate::titles::derive_provisional_title;
 use crate::titles::normalize_generated_title;
@@ -146,6 +149,10 @@ pub struct ServerRuntime {
     /// startup. When set, `handle_turn_start` sends busy-path responses here
     /// so they bypass the shared event channel.
     high_pri_tx: Mutex<Option<mpsc::UnboundedSender<serde_json::Value>>>,
+    /// Per-session goal stores for goal lifecycle management.
+    goal_stores: Mutex<HashMap<SessionId, GoalStore>>,
+    /// Per-root-session agent registries for subagent coordination.
+    agent_registries: Mutex<HashMap<SessionId, AgentRegistry>>,
 }
 
 impl ServerRuntime {
@@ -166,6 +173,8 @@ impl ServerRuntime {
             active_tasks: Mutex::new(HashMap::new()),
             next_connection_id: AtomicU64::new(1),
             high_pri_tx: Mutex::new(None),
+            goal_stores: Mutex::new(HashMap::new()),
+            agent_registries: Mutex::new(HashMap::new()),
         })
     }
 
@@ -505,6 +514,16 @@ impl ServerRuntime {
                 self.handle_events_subscribe(connection_id, id?, params)
                     .await,
             ),
+            "goal/create" => Some(self.handle_goal_create(id?, params).await),
+            "goal/pause" => Some(self.handle_goal_pause(id?, params).await),
+            "goal/resume" => Some(self.handle_goal_resume(id?, params).await),
+            "goal/complete" => Some(self.handle_goal_complete(id?, params).await),
+            "goal/cancel" => Some(self.handle_goal_cancel(id?, params).await),
+            "goal/clear" => Some(self.handle_goal_clear(id?, params).await),
+            "goal/status" => Some(self.handle_goal_status(id?, params).await),
+            "agent/spawn" => Some(self.handle_agent_spawn(id?, params).await),
+            "agent/list" => Some(self.handle_agent_list(id?, params).await),
+            "agent/status" => Some(self.handle_agent_status(id?, params).await),
             _ => Some(self.error_response(
                 id?,
                 ProtocolErrorCode::InvalidParams,
@@ -591,6 +610,443 @@ impl ServerRuntime {
             result: serde_json::json!({ "approval_id": approval_id }),
         })
         .expect("serialize approval response")
+    }
+
+    // ── Goal Handlers ─────────────────────────────────────────────────
+
+    async fn handle_goal_create(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: CreateGoalParams = match serde_json::from_value(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return self.error_response(
+                    request_id,
+                    ProtocolErrorCode::InvalidParams,
+                    format!("invalid goal/create params: {e}"),
+                );
+            }
+        };
+
+        let mut stores = self.goal_stores.lock().await;
+        let store = stores
+            .entry(params.session_id)
+            .or_insert_with(GoalStore::new);
+        match store.create(params) {
+            Ok(goal) => serde_json::to_value(SuccessResponse {
+                id: request_id,
+                result: serde_json::json!({
+                    "goal_id": goal.goal_id.0,
+                    "status": format!("{:?}", goal.status).to_lowercase(),
+                }),
+            })
+            .expect("serialize goal create result"),
+            Err(e) => self.error_response(
+                request_id,
+                ProtocolErrorCode::InvalidParams,
+                format!("goal creation failed: {e}"),
+            ),
+        }
+    }
+
+    async fn handle_goal_pause(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: crate::runtime::handlers::goal::GoalPauseParams =
+            match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return self.error_response(
+                        request_id,
+                        ProtocolErrorCode::InvalidParams,
+                        format!("invalid goal/pause params: {e}"),
+                    );
+                }
+            };
+
+        let mut stores = self.goal_stores.lock().await;
+        let Some(store) = stores.get_mut(&params.session_id) else {
+            return self.error_response(
+                request_id,
+                ProtocolErrorCode::SessionNotFound,
+                "no goal store for session",
+            );
+        };
+        match store.mutate(GoalMutation {
+            goal_id: GoalId(params.goal_id),
+            action: GoalAction::Pause,
+        }) {
+            Ok(goal) => serde_json::to_value(SuccessResponse {
+                id: request_id,
+                result: serde_json::json!({
+                    "goal_id": goal.goal_id.0,
+                    "status": format!("{:?}", goal.status).to_lowercase(),
+                }),
+            })
+            .expect("serialize goal pause result"),
+            Err(e) => self.error_response(
+                request_id,
+                ProtocolErrorCode::InvalidParams,
+                format!("goal pause failed: {e}"),
+            ),
+        }
+    }
+
+    async fn handle_goal_resume(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: crate::runtime::handlers::goal::GoalResumeParams =
+            match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return self.error_response(
+                        request_id,
+                        ProtocolErrorCode::InvalidParams,
+                        format!("invalid goal/resume params: {e}"),
+                    );
+                }
+            };
+
+        let mut stores = self.goal_stores.lock().await;
+        let Some(store) = stores.get_mut(&params.session_id) else {
+            return self.error_response(
+                request_id,
+                ProtocolErrorCode::SessionNotFound,
+                "no goal store for session",
+            );
+        };
+        match store.mutate(GoalMutation {
+            goal_id: GoalId(params.goal_id),
+            action: GoalAction::Resume,
+        }) {
+            Ok(goal) => serde_json::to_value(SuccessResponse {
+                id: request_id,
+                result: serde_json::json!({
+                    "goal_id": goal.goal_id.0,
+                    "status": format!("{:?}", goal.status).to_lowercase(),
+                }),
+            })
+            .expect("serialize goal resume result"),
+            Err(e) => self.error_response(
+                request_id,
+                ProtocolErrorCode::InvalidParams,
+                format!("goal resume failed: {e}"),
+            ),
+        }
+    }
+
+    async fn handle_goal_complete(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: crate::runtime::handlers::goal::GoalCompleteParams =
+            match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return self.error_response(
+                        request_id,
+                        ProtocolErrorCode::InvalidParams,
+                        format!("invalid goal/complete params: {e}"),
+                    );
+                }
+            };
+
+        let mut stores = self.goal_stores.lock().await;
+        let Some(store) = stores.get_mut(&params.session_id) else {
+            return self.error_response(
+                request_id,
+                ProtocolErrorCode::SessionNotFound,
+                "no goal store for session",
+            );
+        };
+        match store.mutate(GoalMutation {
+            goal_id: GoalId(params.goal_id),
+            action: GoalAction::Complete {
+                summary: params.verification_summary,
+            },
+        }) {
+            Ok(goal) => serde_json::to_value(SuccessResponse {
+                id: request_id,
+                result: serde_json::json!({
+                    "goal_id": goal.goal_id.0,
+                    "status": format!("{:?}", goal.status).to_lowercase(),
+                }),
+            })
+            .expect("serialize goal complete result"),
+            Err(e) => self.error_response(
+                request_id,
+                ProtocolErrorCode::InvalidParams,
+                format!("goal complete failed: {e}"),
+            ),
+        }
+    }
+
+    async fn handle_goal_cancel(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: crate::runtime::handlers::goal::GoalCancelParams =
+            match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return self.error_response(
+                        request_id,
+                        ProtocolErrorCode::InvalidParams,
+                        format!("invalid goal/cancel params: {e}"),
+                    );
+                }
+            };
+
+        let mut stores = self.goal_stores.lock().await;
+        let Some(store) = stores.get_mut(&params.session_id) else {
+            return self.error_response(
+                request_id,
+                ProtocolErrorCode::SessionNotFound,
+                "no goal store for session",
+            );
+        };
+        match store.mutate(GoalMutation {
+            goal_id: GoalId(params.goal_id),
+            action: GoalAction::Cancel,
+        }) {
+            Ok(goal) => serde_json::to_value(SuccessResponse {
+                id: request_id,
+                result: serde_json::json!({
+                    "goal_id": goal.goal_id.0,
+                    "status": format!("{:?}", goal.status).to_lowercase(),
+                }),
+            })
+            .expect("serialize goal cancel result"),
+            Err(e) => self.error_response(
+                request_id,
+                ProtocolErrorCode::InvalidParams,
+                format!("goal cancel failed: {e}"),
+            ),
+        }
+    }
+
+    async fn handle_goal_clear(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: crate::runtime::handlers::goal::GoalClearParams =
+            match serde_json::from_value(params) {
+                Ok(p) => p,
+                Err(e) => {
+                    return self.error_response(
+                        request_id,
+                        ProtocolErrorCode::InvalidParams,
+                        format!("invalid goal/clear params: {e}"),
+                    );
+                }
+            };
+
+        let mut stores = self.goal_stores.lock().await;
+        if let Some(store) = stores.get_mut(&params.session_id) {
+            if let Some(goal) = store.get().cloned() {
+                if goal.status.is_terminal() {
+                    store
+                        .mutate(GoalMutation {
+                            goal_id: goal.goal_id.clone(),
+                            action: GoalAction::Clear,
+                        })
+                        .ok();
+                }
+            }
+        }
+        serde_json::to_value(SuccessResponse {
+            id: request_id,
+            result: serde_json::json!({ "cleared": true }),
+        })
+        .expect("serialize goal clear result")
+    }
+
+    async fn handle_goal_status(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        #[derive(serde::Deserialize)]
+        struct GoalStatusParams {
+            session_id: SessionId,
+        }
+
+        let params: GoalStatusParams = match serde_json::from_value(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return self.error_response(
+                    request_id,
+                    ProtocolErrorCode::InvalidParams,
+                    format!("invalid goal/status params: {e}"),
+                );
+            }
+        };
+
+        let stores = self.goal_stores.lock().await;
+        let goal_store: Option<&GoalStore> = stores.get(&params.session_id);
+        let projection = goal_store
+            .and_then(|store| store.get())
+            .map(GoalProjection::from);
+
+        serde_json::to_value(SuccessResponse {
+            id: request_id,
+            result: serde_json::json!({ "goal": projection }),
+        })
+        .expect("serialize goal status result")
+    }
+
+    // ── Agent Handlers ────────────────────────────────────────────────
+
+    async fn handle_agent_spawn(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let params: SpawnAgentParams = match serde_json::from_value(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return self.error_response(
+                    request_id,
+                    ProtocolErrorCode::InvalidParams,
+                    format!("invalid agent/spawn params: {e}"),
+                );
+            }
+        };
+
+        let child_session_id = SessionId::new();
+        let mut registries = self.agent_registries.lock().await;
+        let registry = registries
+            .entry(params.parent_session_id)
+            .or_insert_with(AgentRegistry::new);
+
+        let agent_path = format!("root/{}", params.agent_nickname);
+        let metadata = SubagentMetadata {
+            session_id: child_session_id,
+            parent_session_id: params.parent_session_id,
+            agent_path: agent_path.clone(),
+            nickname: params.agent_nickname,
+            role: params.agent_role,
+            status: SubagentStatus::Spawning,
+            spawned_at: chrono::Utc::now(),
+            closed_at: None,
+        };
+        registry.register(params.parent_session_id, child_session_id, metadata);
+
+        serde_json::to_value(SuccessResponse {
+            id: request_id,
+            result: serde_json::json!({
+                "child_session_id": child_session_id.to_string(),
+                "agent_path": agent_path,
+            }),
+        })
+        .expect("serialize agent spawn result")
+    }
+
+    async fn handle_agent_list(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        #[derive(serde::Deserialize)]
+        struct AgentListParams {
+            session_id: SessionId,
+        }
+
+        let params: AgentListParams = match serde_json::from_value(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return self.error_response(
+                    request_id,
+                    ProtocolErrorCode::InvalidParams,
+                    format!("invalid agent/list params: {e}"),
+                );
+            }
+        };
+
+        let registries = self.agent_registries.lock().await;
+        let agents: Vec<serde_json::Value> = registries
+            .get(&params.session_id)
+            .map(|registry| {
+                registry
+                    .children_of(params.session_id)
+                    .iter()
+                    .filter_map(|child_id| registry.get(*child_id))
+                    .map(|meta| {
+                        serde_json::json!({
+                            "session_id": meta.session_id.to_string(),
+                            "nickname": meta.nickname,
+                            "role": meta.role,
+                            "status": format!("{:?}", meta.status).to_lowercase(),
+                            "agent_path": meta.agent_path,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        serde_json::to_value(SuccessResponse {
+            id: request_id,
+            result: serde_json::json!({ "agents": agents }),
+        })
+        .expect("serialize agent list result")
+    }
+
+    async fn handle_agent_status(
+        &self,
+        request_id: serde_json::Value,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        #[derive(serde::Deserialize)]
+        struct AgentStatusParams {
+            parent_session_id: SessionId,
+            child_session_id: SessionId,
+        }
+
+        let params: AgentStatusParams = match serde_json::from_value(params) {
+            Ok(p) => p,
+            Err(e) => {
+                return self.error_response(
+                    request_id,
+                    ProtocolErrorCode::InvalidParams,
+                    format!("invalid agent/status params: {e}"),
+                );
+            }
+        };
+
+        let registries = self.agent_registries.lock().await;
+        let agent = registries
+            .get(&params.parent_session_id)
+            .and_then(|registry| registry.get(params.child_session_id));
+
+        match agent {
+            Some(meta) => serde_json::to_value(SuccessResponse {
+                id: request_id,
+                result: serde_json::json!({
+                    "session_id": meta.session_id.to_string(),
+                    "nickname": meta.nickname,
+                    "role": meta.role,
+                    "status": format!("{:?}", meta.status).to_lowercase(),
+                    "agent_path": meta.agent_path,
+                    "spawned_at": meta.spawned_at.to_rfc3339(),
+                    "closed_at": meta.closed_at.map(|t| t.to_rfc3339()),
+                }),
+            })
+            .expect("serialize agent status result"),
+            None => self.error_response(
+                request_id,
+                ProtocolErrorCode::SessionNotFound,
+                "agent not found",
+            ),
+        }
     }
 
     fn build_permission_checker(

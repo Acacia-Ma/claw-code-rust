@@ -8,12 +8,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use crate::context_pipeline::{
+    AssembledContext, ContextAssembler, ContextConfig, ContextEntry as PipelineContextEntry,
+};
 use crate::durable_record::{
     ContentPart, DurableRecord, InvocationId, Mention, ModelBindingId, ProviderId,
 };
 use crate::session_store::SessionStore;
 use devo_protocol::{
-    ItemId, ReasoningEffort, SessionId, ToolDefinition, TurnId, TurnKind, TurnStatus, TurnUsage,
+    ItemId, ModelCatalog, ReasoningEffort, SessionId, ToolDefinition, TurnId, TurnKind, TurnStatus,
+    TurnUsage,
 };
 
 // ── Turn Admission ──────────────────────────────────────────────────
@@ -101,14 +105,7 @@ pub struct ResolvedModelProfile {
     pub modalities: Vec<String>,
 }
 
-/// Assembled context ready for provider invocation.
-#[derive(Debug, Clone)]
-pub struct AssembledContext {
-    pub context_id: String,
-    pub entries: Vec<ContextEntry>,
-    pub token_estimate: u64,
-    pub immutable_prefix_hash: String,
-}
+/// Assembled context is defined in context_pipeline and re-exported here.
 
 #[derive(Debug, Clone)]
 pub enum ContextEntry {
@@ -546,27 +543,33 @@ pub async fn prepare_model_invocation(
     session: &SessionProjection,
     turn: &TurnProjection,
     registry: &dyn ToolRegistry,
+    model_catalog: &dyn ModelCatalog,
+    base_instructions: &str,
+    project_instructions: &[String],
+    active_skills: &[String],
+    memory_context: Option<&str>,
+    goal_context: Option<&str>,
     cancel_token: &CancellationToken,
 ) -> Result<ModelInvocationPlan, TurnEngineError> {
     if cancel_token.is_cancelled() {
         return Err(TurnEngineError::Cancelled);
     }
 
-    let invocation_id = crate::durable_record::InvocationId::new();
+    let invocation_id = InvocationId::new();
 
-    // Resolve model profile from session metadata
-    let model_slug = session
-        .metadata
-        .model
-        .clone()
-        .unwrap_or_else(|| "default".to_string());
+    // Resolve model profile from session metadata using the catalog
+    let model_slug = session.metadata.model.as_deref();
+    let resolved_model_def = model_catalog
+        .resolve_for_turn(model_slug)
+        .map_err(|e| TurnEngineError::ModelResolutionFailed(e.to_string()))?;
+
     let resolved_model = ResolvedModelProfile {
-        canonical_model_slug: model_slug.clone(),
-        provider_id: crate::durable_record::ProviderId::new(),
-        model_binding_id: crate::durable_record::ModelBindingId::new(),
-        display_name: model_slug.clone(),
-        context_window: 200000,
-        effective_context_window: 180000,
+        canonical_model_slug: resolved_model_def.slug.clone(),
+        provider_id: ProviderId::new(),
+        model_binding_id: ModelBindingId::new(),
+        display_name: resolved_model_def.display_name.clone(),
+        context_window: resolved_model_def.context_window as u64,
+        effective_context_window: (resolved_model_def.context_window as f64 * 0.9) as u64,
         reasoning_effort: None,
         modalities: vec!["text".to_string()],
     };
@@ -574,11 +577,62 @@ pub async fn prepare_model_invocation(
     // Collect tool definitions from registry
     let tool_definitions = registry.list_definitions();
 
-    // Build provider-neutral invocation input
+    // Build tool schemas for context assembly
+    let tool_schemas: Vec<(String, serde_json::Value)> = tool_definitions
+        .iter()
+        .map(|def| (def.name.clone(), def.input_schema.clone()))
+        .collect();
+
+    // Assemble context using the context pipeline
+    let assembler = ContextAssembler::new(ContextConfig::default());
+    let assembled = assembler.assemble(
+        session.session_id,
+        turn.turn_id,
+        base_instructions,
+        &tool_schemas,
+        &[],  // prior_transcript (empty for now; populated by replay)
+        None, // persona
+        None, // interaction_mode
+        project_instructions,
+        active_skills,
+        memory_context,
+        goal_context,
+        None, // change_signal
+        None, // user_input (already in turn)
+    );
+
+    // Build provider-neutral invocation input from assembled context
+    let context_entries: Vec<ContextEntry> = assembled
+        .entries
+        .iter()
+        .map(|entry| match entry {
+            PipelineContextEntry::InstructionRef { content, .. } => {
+                ContextEntry::SystemPrompt(content.clone())
+            }
+            PipelineContextEntry::ToolSchema { name, schema } => {
+                ContextEntry::ToolDefinition(format!("{}: {}", name, schema))
+            }
+            PipelineContextEntry::TranscriptItemRef { turn_id, item_id } => {
+                ContextEntry::TranscriptItem {
+                    turn_id: *turn_id,
+                    item_id: *item_id,
+                }
+            }
+            PipelineContextEntry::TranscriptRangeRef { from, to } => {
+                ContextEntry::ContextSummary(format!("transcript range {}..{}", from, to))
+            }
+            PipelineContextEntry::ContextSummaryRef { summary_id } => {
+                ContextEntry::ContextSummary(summary_id.clone())
+            }
+            PipelineContextEntry::ArtifactRef { artifact_id } => ContextEntry::InstructionFile {
+                path: artifact_id.clone(),
+                content: String::new(),
+            },
+        })
+        .collect();
+
     let provider_input = ProviderInvocationInput {
-        context_entries: vec![ContextEntry::SystemPrompt(
-            "You are a helpful assistant.".to_string(),
-        )],
+        context_entries,
         tool_definitions: tool_definitions.clone(),
         model_profile: resolved_model.clone(),
         reasoning_effort: resolved_model.reasoning_effort,
@@ -589,12 +643,7 @@ pub async fn prepare_model_invocation(
         invocation_id,
         turn_id: turn.turn_id,
         resolved_model,
-        context_snapshot: AssembledContext {
-            context_id: format!("ctx-{}", uuid::Uuid::new_v4()),
-            entries: vec![],
-            token_estimate: 0,
-            immutable_prefix_hash: String::new(),
-        },
+        context_snapshot: assembled,
         provider_input,
         tool_definitions,
         retry_policy: InvocationRetryPolicy {
@@ -909,9 +958,12 @@ pub async fn finish_model_invocation(
                     tool_calls: calls,
                     continuation_context: AssembledContext {
                         context_id: format!("cont-{}", uuid::Uuid::new_v4()),
+                        session_id: state.session_id,
+                        created_for_turn: state.turn_id,
                         entries: vec![],
                         token_estimate: 0,
                         immutable_prefix_hash: String::new(),
+                        created_at: chrono::Utc::now(),
                     },
                     usage_delta: usage,
                 })
@@ -946,17 +998,12 @@ pub async fn finish_model_invocation(
 // ── Traits needed by core entry points ──────────────────────────────
 
 /// Projected session state for core consumption.
+///
+/// Uses the protocol's SessionMetadata directly to avoid duplication.
 #[derive(Debug, Clone)]
 pub struct SessionProjection {
     pub session_id: SessionId,
-    pub turns: Vec<TurnProjection>,
-    pub metadata: SessionMetadata,
-}
-
-#[derive(Debug, Clone)]
-pub struct SessionMetadata {
-    pub model: Option<String>,
-    pub thinking: Option<String>,
+    pub metadata: devo_protocol::SessionMetadata,
 }
 
 /// Projected turn state for core consumption.
@@ -1361,9 +1408,12 @@ mod tests {
         }];
         let ctx = AssembledContext {
             context_id: "ctx-1".into(),
+            session_id: SessionId::new(),
+            created_for_turn: TurnId::new(),
             entries: vec![],
             token_estimate: 5000,
             immutable_prefix_hash: "hash".into(),
+            created_at: chrono::Utc::now(),
         };
         let outcome = ModelInvocationOutcome::ToolCallsRequired {
             tool_calls: calls,

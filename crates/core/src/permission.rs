@@ -626,6 +626,60 @@ pub fn authorize_tool_request(
     }
 }
 
+// ── Execution Grant ──────────────────────────────────────────────
+
+/// A scoped grant token representing an approved tool execution.
+///
+/// Per L3-BEH-SAFETY-002, `ExecutionGrant` is produced by the approval
+/// pipeline and consumed by the sandbox enforcement layer. It captures
+/// the scope and constraints of an approved operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionGrant {
+    /// Unique identifier for this grant.
+    pub grant_id: String,
+    /// The tool call this grant authorizes.
+    pub tool_call_id: String,
+    /// The tool name this grant authorizes.
+    pub tool_name: String,
+    /// The scope of the approval (Once, Turn, Session, etc.).
+    pub scope: ApprovalScope,
+    /// The permission profile that was active when the grant was issued.
+    pub permission_mode: PermissionMode,
+    /// When the grant was issued.
+    pub issued_at: chrono::DateTime<chrono::Utc>,
+    /// When the grant expires, if applicable.
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional constraints on the grant (e.g., specific paths, commands).
+    pub constraints: GrantConstraints,
+}
+
+/// Additional constraints on an execution grant.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GrantConstraints {
+    /// Allowed working directory paths.
+    pub allowed_paths: Vec<PathBuf>,
+    /// Allowed command prefixes.
+    pub allowed_command_prefixes: Vec<Vec<String>>,
+    /// Allowed network hosts.
+    pub allowed_hosts: Vec<String>,
+}
+
+impl ExecutionGrant {
+    /// Check if the grant is still valid (not expired).
+    pub fn is_valid(&self) -> bool {
+        if let Some(expires_at) = self.expires_at {
+            chrono::Utc::now() < expires_at
+        } else {
+            true
+        }
+    }
+
+    /// Check if the grant matches the given tool call.
+    pub fn matches(&self, tool_call_id: &str, tool_name: &str) -> bool {
+        self.tool_call_id == tool_call_id && self.tool_name == tool_name
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]

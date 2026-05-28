@@ -2,38 +2,83 @@ use async_trait::async_trait;
 use base64::Engine;
 use tokio::time::{Duration, timeout};
 
-use crate::errors::ToolExecutionError;
-use crate::events::ToolProgressSender;
-use crate::handler_kind::ToolHandlerKind;
-use crate::invocation::{FunctionToolOutput, ToolInvocation, ToolOutput};
+use crate::contracts::{
+    ToolCallError, ToolContext, ToolProgressSender, ToolResult, ToolResultContent,
+};
+use crate::json_schema::JsonSchema;
 use crate::tool_handler::ToolHandler;
+use crate::tool_spec::{ToolCapabilityTag, ToolExecutionMode, ToolOutputMode, ToolSpec};
 
 const MAX_RESPONSE_SIZE: usize = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const MAX_TIMEOUT_MS: u64 = 120_000;
 
-pub struct WebFetchHandler;
+pub struct WebFetchHandler {
+    spec: ToolSpec,
+}
+
+impl WebFetchHandler {
+    pub fn new() -> Self {
+        Self {
+            spec: ToolSpec {
+                name: "webfetch".into(),
+                description: "Fetches content from a specified URL.".into(),
+                input_schema: JsonSchema::object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "url".to_string(),
+                            JsonSchema::string(Some("The URL to fetch content from")),
+                        ),
+                        (
+                            "format".to_string(),
+                            JsonSchema::string(Some(
+                                "The format to return the content in (text, markdown, html)",
+                            )),
+                        ),
+                        (
+                            "timeout".to_string(),
+                            JsonSchema::integer(Some("Optional timeout in seconds")),
+                        ),
+                    ]),
+                    Some(vec!["url".to_string()]),
+                    None,
+                ),
+                output_mode: ToolOutputMode::Mixed,
+                execution_mode: ToolExecutionMode::ReadOnly,
+                capability_tags: vec![ToolCapabilityTag::NetworkAccess],
+                supports_parallel: true,
+                preparation_feedback: crate::tool_spec::ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
+            },
+        }
+    }
+}
 
 #[async_trait]
 impl ToolHandler for WebFetchHandler {
-    fn tool_kind(&self) -> ToolHandlerKind {
-        ToolHandlerKind::WebFetch
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
     }
 
     async fn handle(
         &self,
-        invocation: ToolInvocation,
+        _ctx: ToolContext,
+        input: serde_json::Value,
         _progress: Option<ToolProgressSender>,
-    ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-        let url = invocation.input["url"].as_str().unwrap_or("");
+    ) -> Result<ToolResult, ToolCallError> {
+        let url = input["url"].as_str().unwrap_or("");
         if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return Ok(Box::new(FunctionToolOutput::error(
-                "URL must start with http:// or https://",
-            )));
+            return Ok(ToolResult::error(
+                ToolResultContent::Text("URL must start with http:// or https://".into()),
+                "Invalid URL",
+                ToolCallError::InvalidInput("URL must start with http:// or https://".into()),
+            ));
         }
 
-        let format = invocation.input["format"].as_str().unwrap_or("markdown");
-        let timeout_ms = invocation.input["timeout"]
+        let format = input["format"].as_str().unwrap_or("markdown");
+        let timeout_ms = input["timeout"]
             .as_u64()
             .unwrap_or(DEFAULT_TIMEOUT_MS / 1000)
             .saturating_mul(1000)
@@ -53,9 +98,7 @@ impl ToolHandler for WebFetchHandler {
         let client = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
             .build()
-            .map_err(|e| ToolExecutionError::ExecutionFailed {
-                message: format!("Failed to create HTTP client: {e}"),
-            })?;
+            .map_err(|e| ToolCallError::ExecutionFailed(format!("Failed to create HTTP client: {e}")))?;
 
         let request = client
             .get(url)
@@ -64,26 +107,35 @@ impl ToolHandler for WebFetchHandler {
 
         let response = timeout(Duration::from_millis(timeout_ms), request.send()).await;
         let response = match response {
-            Ok(result) => result.map_err(|e| ToolExecutionError::ExecutionFailed {
-                message: format!("Request failed: {e}"),
-            })?,
-            Err(_) => return Ok(Box::new(FunctionToolOutput::error("Request timed out"))),
+            Ok(result) => result
+                .map_err(|e| ToolCallError::ExecutionFailed(format!("Request failed: {e}")))?,
+            Err(_) => {
+                return Ok(ToolResult::error(
+                    ToolResultContent::Text("Request timed out".into()),
+                    "Timeout",
+                    ToolCallError::TimedOut(timeout_ms / 1000),
+                ));
+            }
         };
 
         if !response.status().is_success() {
-            return Ok(Box::new(FunctionToolOutput::error(format!(
-                "Request failed with status code: {}",
-                response.status()
-            ))));
+            let msg = format!("Request failed with status code: {}", response.status());
+            return Ok(ToolResult::error(
+                ToolResultContent::Text(msg.clone()),
+                "HTTP error",
+                ToolCallError::ExecutionFailed(msg),
+            ));
         }
 
         if response
             .content_length()
             .is_some_and(|len| len as usize > MAX_RESPONSE_SIZE)
         {
-            return Ok(Box::new(FunctionToolOutput::error(
-                "Response too large (exceeds 5MB limit)",
-            )));
+            return Ok(ToolResult::error(
+                ToolResultContent::Text("Response too large (exceeds 5MB limit)".into()),
+                "Response too large",
+                ToolCallError::ExecutionFailed("response too large".into()),
+            ));
         }
 
         let content_type = response
@@ -103,19 +155,19 @@ impl ToolHandler for WebFetchHandler {
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| ToolExecutionError::ExecutionFailed {
-                message: format!("Failed to read response: {e}"),
-            })?;
+            .map_err(|e| ToolCallError::ExecutionFailed(format!("Failed to read response: {e}")))?;
 
         if bytes.len() > MAX_RESPONSE_SIZE {
-            return Ok(Box::new(FunctionToolOutput::error(
-                "Response too large (exceeds 5MB limit)",
-            )));
+            return Ok(ToolResult::error(
+                ToolResultContent::Text("Response too large (exceeds 5MB limit)".into()),
+                "Response too large",
+                ToolCallError::ExecutionFailed("response too large".into()),
+            ));
         }
 
         if is_image_mime(&mime) {
-            return Ok(Box::new(FunctionToolOutput {
-                content: crate::invocation::ToolContent::Mixed {
+            return Ok(ToolResult::success(
+                ToolResultContent::Mixed {
                     text: Some("Image fetched successfully".to_string()),
                     json: Some(serde_json::json!({
                         "title": title,
@@ -123,9 +175,8 @@ impl ToolHandler for WebFetchHandler {
                         "image_base64": base64::engine::general_purpose::STANDARD.encode(bytes),
                     })),
                 },
-                is_error: false,
-                display_content: None,
-            }));
+                "Image fetched",
+            ));
         }
 
         let content = String::from_utf8_lossy(&bytes).into_owned();
@@ -148,14 +199,13 @@ impl ToolHandler for WebFetchHandler {
             _ => content,
         };
 
-        Ok(Box::new(FunctionToolOutput {
-            content: crate::invocation::ToolContent::Mixed {
+        Ok(ToolResult::success(
+            ToolResultContent::Mixed {
                 text: Some(output),
                 json: Some(serde_json::json!({ "title": title, "mime": mime })),
             },
-            is_error: false,
-            display_content: None,
-        }))
+            "Content fetched",
+        ))
     }
 }
 

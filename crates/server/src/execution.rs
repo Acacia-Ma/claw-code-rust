@@ -24,10 +24,11 @@ use devo_core::TurnConfig;
 use devo_core::TurnId;
 use devo_core::default_base_instructions;
 use devo_core::normalize_canonical_path;
+use devo_core::tools::ToolRegistry;
 use devo_protocol::ApprovalDecisionValue;
 use devo_protocol::PendingInputItem;
 use devo_provider::ModelProviderSDK;
-use devo_tools::ToolRegistry;
+use devo_provider::ProviderRouter;
 
 use crate::InputItem;
 use crate::SkillRecord;
@@ -64,6 +65,8 @@ pub(crate) struct ApprovalGrantCache {
 pub struct ServerRuntimeDependencies {
     /// Provider used for all model requests.
     pub(crate) provider: Arc<dyn ModelProviderSDK>,
+    /// Provider router facade for model invocation dispatch.
+    pub(crate) provider_router: Arc<dyn ProviderRouter>,
     /// Shared built-in tool registry used by turn execution.
     pub(crate) registry: Arc<ToolRegistry>,
     /// Default model applied when no model override is present.
@@ -90,6 +93,7 @@ impl ServerRuntimeDependencies {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Arc<dyn ModelProviderSDK>,
+        provider_router: Arc<dyn ProviderRouter>,
         registry: Arc<ToolRegistry>,
         default_model: String,
         model_catalog: Arc<dyn ModelCatalog>,
@@ -101,6 +105,7 @@ impl ServerRuntimeDependencies {
     ) -> Self {
         Self {
             provider,
+            provider_router,
             registry,
             default_model,
             model_catalog,

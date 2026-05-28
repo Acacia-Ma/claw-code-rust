@@ -6,7 +6,7 @@ use serde_json::json;
 use tokio::fs;
 use tracing::debug;
 
-use crate::FunctionToolOutput;
+use crate::invocation::FunctionToolOutput;
 
 pub(crate) async fn exec_apply_patch(
     cwd: &std::path::Path,

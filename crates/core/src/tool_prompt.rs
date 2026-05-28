@@ -1,5 +1,5 @@
+use crate::tools::{DeferredLoadingConfig, LoadedDeferredTools, ToolRegistry, ToolSearchMetrics};
 use devo_protocol::ToolDefinition;
-use devo_tools::{DeferredLoadingConfig, LoadedDeferredTools, ToolRegistry, ToolSearchMetrics};
 
 #[derive(Debug, Clone)]
 pub struct ToolPromptSurface {
@@ -39,9 +39,9 @@ pub fn build_deferred_tool_prompt_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use devo_tools::json_schema::JsonSchema;
-    use devo_tools::registry::ToolRegistryBuilder;
-    use devo_tools::tool_spec::{
+    use crate::tools::json_schema::JsonSchema;
+    use crate::tools::registry::ToolRegistryBuilder;
+    use crate::tools::tool_spec::{
         ToolExecutionMode, ToolOutputMode, ToolPreparationFeedback, ToolSpec,
     };
     use pretty_assertions::assert_eq;

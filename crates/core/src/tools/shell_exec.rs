@@ -8,8 +8,8 @@ use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 use tracing::info;
 
-use crate::FunctionToolOutput;
 use crate::events::ToolProgressSender;
+use crate::invocation::FunctionToolOutput;
 
 const MAX_METADATA_LENGTH: usize = 30_000;
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;

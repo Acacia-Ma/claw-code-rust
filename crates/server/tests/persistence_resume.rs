@@ -11,14 +11,15 @@ use tempfile::TempDir;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+use devo_core::tools::ToolRegistry;
 use devo_core::{FileSystemSkillCatalog, PresetModelCatalog, SkillsConfig};
 use devo_protocol::{
     ModelRequest, ModelResponse, ResponseContent, ResponseMetadata, SessionHistoryItemKind,
     StopReason, StreamEvent, TurnStatus, Usage,
 };
 use devo_provider::ModelProviderSDK;
+use devo_provider::SingleProviderRouter;
 use devo_server::{ClientTransportKind, ServerRuntime, ServerRuntimeDependencies};
-use devo_tools::ToolRegistry;
 
 struct SingleReplyProvider;
 
@@ -1043,7 +1044,8 @@ fn build_runtime_with_provider(
     Ok(ServerRuntime::new(
         data_root.to_path_buf(),
         ServerRuntimeDependencies::new(
-            provider,
+            Arc::clone(&provider),
+            Arc::new(SingleProviderRouter::new(provider)),
             Arc::new(ToolRegistry::new()),
             "test-model".to_string(),
             Arc::new(PresetModelCatalog::default()),

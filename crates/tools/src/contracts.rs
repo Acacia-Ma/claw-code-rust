@@ -83,7 +83,11 @@ impl ToolResult {
         }
     }
 
-    pub fn error(content: ToolResultContent, summary: impl Into<String>, error: ToolCallError) -> Self {
+    pub fn error(
+        content: ToolResultContent,
+        summary: impl Into<String>,
+        error: ToolCallError,
+    ) -> Self {
         Self {
             content,
             display_content: None,
@@ -100,7 +104,10 @@ impl ToolResult {
 pub enum ToolResultContent {
     Text(String),
     Json(serde_json::Value),
-    Mixed { text: Option<String>, json: Option<serde_json::Value> },
+    Mixed {
+        text: Option<String>,
+        json: Option<serde_json::Value>,
+    },
 }
 
 /// Terminal status of a tool execution.
@@ -153,10 +160,7 @@ pub enum ToolCallError {
 impl ToolCallError {
     /// Whether this error is recoverable (retry may succeed).
     pub fn is_recoverable(&self) -> bool {
-        matches!(
-            self,
-            Self::TimedOut(_) | Self::InternalError(_)
-        )
+        matches!(self, Self::TimedOut(_) | Self::InternalError(_))
     }
 }
 
@@ -169,7 +173,10 @@ pub enum ToolProgress {
     /// Incremental output delta.
     OutputDelta { delta: String },
     /// Status update message.
-    StatusUpdate { message: String, percent: Option<u8> },
+    StatusUpdate {
+        message: String,
+        percent: Option<u8>,
+    },
     /// Tool execution completed (terminal).
     Completion { summary: String },
 }
@@ -202,6 +209,31 @@ pub trait ToolRegistry: Send + Sync {
     fn list_all_specs(&self) -> Vec<&ToolSpec>;
 }
 
+/// No-op implementation of ToolRegistry for testing.
+pub struct NoopToolRegistry;
+
+impl ToolRegistry for NoopToolRegistry {
+    fn get(&self, _name: &str) -> Option<Arc<dyn ToolHandler>> {
+        None
+    }
+
+    fn spec(&self, _name: &str) -> Option<&ToolSpec> {
+        None
+    }
+
+    fn list_available(
+        &self,
+        _mode: &SessionMode,
+        _permission: &ToolPermissionProfile,
+    ) -> Vec<&ToolSpec> {
+        Vec::new()
+    }
+
+    fn list_all_specs(&self) -> Vec<&ToolSpec> {
+        Vec::new()
+    }
+}
+
 /// Session mode for tool availability gating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionMode {
@@ -210,22 +242,9 @@ pub enum SessionMode {
     Review,
 }
 
-// ── ToolHandler Trait ────────────────────────────────────────────────
-
-/// The handler trait that every tool must implement.
-#[async_trait]
-pub trait ToolHandler: Send + Sync {
-    /// Return the tool's specification.
-    fn spec(&self) -> &ToolSpec;
-
-    /// Execute the tool with the given context and input.
-    async fn handle(
-        &self,
-        ctx: ToolContext,
-        input: serde_json::Value,
-        progress: Option<ToolProgressSender>,
-    ) -> Result<ToolResult, ToolCallError>;
-}
+// ToolHandler is defined in tool_handler.rs to avoid duplication.
+// Re-exported here for convenience.
+pub use crate::tool_handler::ToolHandler;
 
 // ── Tests ───────────────────────────────────────────────────────────
 
@@ -239,7 +258,10 @@ mod tests {
             ToolResultContent::Text("file contents".into()),
             "Read 100 bytes",
         );
-        assert!(matches!(result.structured_status, ToolTerminalStatus::Completed));
+        assert!(matches!(
+            result.structured_status,
+            ToolTerminalStatus::Completed
+        ));
         assert_eq!(result.result_summary, "Read 100 bytes");
         assert_eq!(result.redaction_state, RedactionState::Clean);
     }
@@ -282,8 +304,7 @@ mod tests {
         ];
         for err in &errors {
             let json = serde_json::to_string(err).expect("serialize");
-            let restored: ToolCallError =
-                serde_json::from_str(&json).expect("deserialize");
+            let restored: ToolCallError = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(format!("{}", restored), format!("{}", err));
         }
     }
@@ -291,15 +312,25 @@ mod tests {
     #[test]
     fn tool_progress_serde_roundtrip() {
         let progress_items = vec![
-            ToolProgress::OutputDelta { delta: "building...".into() },
-            ToolProgress::StatusUpdate { message: "50% done".into(), percent: Some(50) },
-            ToolProgress::Completion { summary: "Build complete".into() },
+            ToolProgress::OutputDelta {
+                delta: "building...".into(),
+            },
+            ToolProgress::StatusUpdate {
+                message: "50% done".into(),
+                percent: Some(50),
+            },
+            ToolProgress::Completion {
+                summary: "Build complete".into(),
+            },
         ];
         for p in &progress_items {
             let json = serde_json::to_string(p).expect("serialize");
             let restored: ToolProgress = serde_json::from_str(&json).expect("deserialize");
             match (p, &restored) {
-                (ToolProgress::OutputDelta { delta: d1 }, ToolProgress::OutputDelta { delta: d2 }) => {
+                (
+                    ToolProgress::OutputDelta { delta: d1 },
+                    ToolProgress::OutputDelta { delta: d2 },
+                ) => {
                     assert_eq!(d1, d2);
                 }
                 _ => {}
@@ -311,10 +342,18 @@ mod tests {
     fn tool_terminal_status_all_variants() {
         let statuses = vec![
             ToolTerminalStatus::Completed,
-            ToolTerminalStatus::Denied { reason: "nope".into() },
-            ToolTerminalStatus::BlockedByMode { reason: "plan".into() },
-            ToolTerminalStatus::NeedsConfiguration { message: "key missing".into() },
-            ToolTerminalStatus::InvalidInput { details: "bad field".into() },
+            ToolTerminalStatus::Denied {
+                reason: "nope".into(),
+            },
+            ToolTerminalStatus::BlockedByMode {
+                reason: "plan".into(),
+            },
+            ToolTerminalStatus::NeedsConfiguration {
+                message: "key missing".into(),
+            },
+            ToolTerminalStatus::InvalidInput {
+                details: "bad field".into(),
+            },
             ToolTerminalStatus::Failed(ToolCallError::Cancelled),
             ToolTerminalStatus::Canceled,
             ToolTerminalStatus::Interrupted,

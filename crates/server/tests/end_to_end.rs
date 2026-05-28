@@ -24,6 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 use devo_core::FileSystemSkillCatalog;
 use devo_core::PresetModelCatalog;
 use devo_core::SkillsConfig;
+use devo_core::tools::ToolRegistry;
 use devo_protocol::ModelRequest;
 use devo_protocol::ModelResponse;
 use devo_protocol::ResponseContent;
@@ -31,9 +32,9 @@ use devo_protocol::StopReason;
 use devo_protocol::StreamEvent;
 use devo_protocol::Usage;
 use devo_provider::ModelProviderSDK;
+use devo_provider::SingleProviderRouter;
 use devo_server::ServerRuntime;
 use devo_server::ServerRuntimeDependencies;
-use devo_tools::ToolRegistry;
 use futures::stream;
 
 const STDIO_SERVER_LINE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -307,10 +308,12 @@ async fn websocket_listener_supports_handshake_subscription_and_turn_lifecycle()
     let bind_address = format!("127.0.0.1:{port}");
     let db_path = std::env::temp_dir().join("test_end_to_end.db");
     let db = Arc::new(devo_server::db::Database::open(db_path).expect("open test database"));
+    let provider: Arc<dyn ModelProviderSDK> = Arc::new(PendingProvider);
     let runtime = ServerRuntime::new(
         std::env::temp_dir(),
         ServerRuntimeDependencies::new(
-            Arc::new(PendingProvider),
+            Arc::clone(&provider),
+            Arc::new(SingleProviderRouter::new(provider)),
             Arc::new(ToolRegistry::new()),
             "test-model".to_string(),
             Arc::new(PresetModelCatalog::default()),
@@ -521,11 +524,14 @@ async fn websocket_turn_streams_final_tool_metadata_for_read_and_glob() -> Resul
     let db = Arc::new(devo_server::db::Database::open(
         db_dir.path().join("e2e.db"),
     )?);
+    let provider: Arc<dyn ModelProviderSDK> =
+        Arc::new(StreamingToolProvider::new(workspace.path().to_path_buf()));
     let runtime = ServerRuntime::new(
         workspace.path().to_path_buf(),
         ServerRuntimeDependencies::new(
-            Arc::new(StreamingToolProvider::new(workspace.path().to_path_buf())),
-            Arc::new(devo_tools::create_default_tool_registry()),
+            Arc::clone(&provider),
+            Arc::new(SingleProviderRouter::new(provider)),
+            Arc::new(devo_core::tools::create_default_tool_registry()),
             "test-model".to_string(),
             Arc::new(PresetModelCatalog::default()),
             None,

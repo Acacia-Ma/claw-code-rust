@@ -19,6 +19,14 @@ use tokio::time::timeout;
 use devo_core::FileSystemSkillCatalog;
 use devo_core::PresetModelCatalog;
 use devo_core::SkillsConfig;
+use devo_core::tools::ToolCallError;
+use devo_core::tools::ToolRegistry;
+use devo_core::tools::ToolResult;
+use devo_core::tools::ToolResultContent;
+use devo_core::tools::json_schema::JsonSchema;
+use devo_core::tools::registry::ToolRegistryBuilder;
+use devo_core::tools::tool_handler::ToolHandler;
+use devo_core::tools::tool_spec::{ToolExecutionMode, ToolOutputMode, ToolSpec};
 use devo_protocol::ModelRequest;
 use devo_protocol::ModelResponse;
 use devo_protocol::RequestContent;
@@ -28,6 +36,7 @@ use devo_protocol::StopReason;
 use devo_protocol::StreamEvent;
 use devo_protocol::Usage;
 use devo_provider::ModelProviderSDK;
+use devo_provider::SingleProviderRouter;
 use devo_server::ClientTransportKind;
 use devo_server::ErrorResponse;
 use devo_server::ProtocolErrorCode;
@@ -38,12 +47,6 @@ use devo_server::SkillListResult;
 use devo_server::SkillRecord;
 use devo_server::SkillSource;
 use devo_server::SuccessResponse;
-use devo_tools::ToolRegistry;
-use devo_tools::invocation::{FunctionToolOutput, ToolInvocation, ToolOutput};
-use devo_tools::json_schema::JsonSchema;
-use devo_tools::registry::ToolRegistryBuilder;
-use devo_tools::tool_handler::ToolHandler;
-use devo_tools::tool_spec::{ToolExecutionMode, ToolOutputMode, ToolSpec};
 
 #[derive(Default)]
 struct CapturingProvider {
@@ -144,7 +147,8 @@ fn build_runtime_with_registry(
     ServerRuntime::new(
         data_root.to_path_buf(),
         ServerRuntimeDependencies::new(
-            provider,
+            Arc::clone(&provider),
+            Arc::new(SingleProviderRouter::new(provider)),
             registry,
             "test-model".to_string(),
             Arc::new(PresetModelCatalog::default()),
@@ -297,9 +301,9 @@ fn auto_review_registry(calls: Arc<std::sync::atomic::AtomicUsize>) -> Arc<ToolR
         input_schema: JsonSchema::object(std::collections::BTreeMap::new(), None, None),
         output_mode: ToolOutputMode::Text,
         execution_mode: ToolExecutionMode::Mutating,
-        capability_tags: vec![devo_tools::ToolCapabilityTag::WriteFiles],
+        capability_tags: vec![devo_core::tools::ToolCapabilityTag::WriteFiles],
         supports_parallel: false,
-        preparation_feedback: devo_tools::ToolPreparationFeedback::None,
+        preparation_feedback: devo_core::tools::ToolPreparationFeedback::None,
         display_name: None,
         supports_cancellation: None,
         supports_streaming: None,
@@ -373,18 +377,34 @@ struct BlockingReadOnlyTool {
 
 #[async_trait]
 impl ToolHandler for BlockingReadOnlyTool {
-    fn tool_kind(&self) -> devo_tools::ToolHandlerKind {
-        devo_tools::ToolHandlerKind::Read
+    fn spec(&self) -> &ToolSpec {
+        Box::leak(Box::new(ToolSpec {
+            name: "blocking_read".into(),
+            description: "blocking read test tool".into(),
+            input_schema: JsonSchema::object(Default::default(), None, None),
+            output_mode: ToolOutputMode::Text,
+            execution_mode: ToolExecutionMode::ReadOnly,
+            capability_tags: vec![],
+            supports_parallel: true,
+            preparation_feedback: devo_core::tools::ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
+        }))
     }
 
     async fn handle(
         &self,
-        _invocation: ToolInvocation,
-        _progress: Option<devo_tools::events::ToolProgressSender>,
-    ) -> Result<Box<dyn ToolOutput>, devo_tools::ToolExecutionError> {
+        _ctx: devo_core::tools::ToolContext,
+        _input: serde_json::Value,
+        _progress: Option<devo_core::tools::ToolProgressSender>,
+    ) -> std::result::Result<ToolResult, ToolCallError> {
         self.started.notify_one();
         self.release.notified().await;
-        Ok(Box::new(FunctionToolOutput::success("released")))
+        Ok(ToolResult::success(
+            ToolResultContent::Text("released".into()),
+            "released",
+        ))
     }
 }
 
@@ -394,17 +414,33 @@ struct RecordingMutatingTool {
 
 #[async_trait]
 impl ToolHandler for RecordingMutatingTool {
-    fn tool_kind(&self) -> devo_tools::ToolHandlerKind {
-        devo_tools::ToolHandlerKind::Write
+    fn spec(&self) -> &ToolSpec {
+        Box::leak(Box::new(ToolSpec {
+            name: "recording_write".into(),
+            description: "recording write test tool".into(),
+            input_schema: JsonSchema::object(Default::default(), None, None),
+            output_mode: ToolOutputMode::Text,
+            execution_mode: ToolExecutionMode::Mutating,
+            capability_tags: vec![],
+            supports_parallel: false,
+            preparation_feedback: devo_core::tools::ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
+        }))
     }
 
     async fn handle(
         &self,
-        _invocation: ToolInvocation,
-        _progress: Option<devo_tools::events::ToolProgressSender>,
-    ) -> Result<Box<dyn ToolOutput>, devo_tools::ToolExecutionError> {
+        _ctx: devo_core::tools::ToolContext,
+        _input: serde_json::Value,
+        _progress: Option<devo_core::tools::ToolProgressSender>,
+    ) -> std::result::Result<ToolResult, ToolCallError> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(Box::new(FunctionToolOutput::success("mutated")))
+        Ok(ToolResult::success(
+            ToolResultContent::Text("mutated".into()),
+            "mutated",
+        ))
     }
 }
 
@@ -955,7 +991,7 @@ async fn turn_steer_injects_resolved_skill_into_next_model_request() -> Result<(
         execution_mode: ToolExecutionMode::ReadOnly,
         capability_tags: vec![],
         supports_parallel: true,
-        preparation_feedback: devo_tools::ToolPreparationFeedback::None,
+        preparation_feedback: devo_core::tools::ToolPreparationFeedback::None,
         display_name: None,
         supports_cancellation: None,
         supports_streaming: None,

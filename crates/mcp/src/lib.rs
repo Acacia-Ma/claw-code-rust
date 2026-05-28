@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 
 pub mod manager;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use smol_str::SmolStr;
 
 /// Strongly typed identifier for one configured MCP server.
@@ -87,6 +89,7 @@ pub struct McpOutputLimits {
     pub max_resource_bytes: Option<u64>,
 }
 
+/// TODO: Let the MCP output limit indentical with tool call output limit.
 impl Default for McpOutputLimits {
     fn default() -> Self {
         Self {
@@ -333,10 +336,19 @@ pub enum McpError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        McpAuthState, McpConfig, McpResourceDescriptor, McpServerId, McpServerRecord,
-        McpServerStatus, McpStartupPolicy, McpStartupState, McpToolDescriptor, McpTransportConfig,
-    };
+    use super::McpAuthState;
+    use super::McpConfig;
+    use super::McpOutputLimits;
+    use super::McpResourceDescriptor;
+    use super::McpRootsPolicy;
+    use super::McpServerId;
+    use super::McpServerRecord;
+    use super::McpServerStatus;
+    use super::McpStartupPolicy;
+    use super::McpStartupState;
+    use super::McpToolDescriptor;
+    use super::McpTransportConfig;
+    use super::McpTrustPolicy;
 
     #[test]
     fn server_status_roundtrip() {

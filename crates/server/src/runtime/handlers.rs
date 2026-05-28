@@ -1,4 +1,4 @@
 mod compaction;
-mod goal;
+pub mod goal;
 mod session;
 mod turn;

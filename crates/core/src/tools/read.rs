@@ -5,7 +5,7 @@ use std::io::BufReader;
 use std::io::Read;
 use std::path::Path;
 
-use crate::FunctionToolOutput;
+use crate::invocation::FunctionToolOutput;
 
 pub(crate) fn read_directory(
     path: &Path,

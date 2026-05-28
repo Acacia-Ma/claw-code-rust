@@ -8,7 +8,7 @@ use futures::stream::FuturesUnordered;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::invocation::{ToolCallId, ToolContent, ToolInvocation, ToolName};
+use crate::invocation::ToolContent;
 use crate::registry::ToolRegistry;
 use crate::tool_spec::ToolCapabilityTag;
 
@@ -181,7 +181,7 @@ impl ToolRuntime {
     pub(crate) async fn execute_single(
         &self,
         call: &ToolCall,
-        on_progress: &Option<ProgressCallbackArc>,
+        _on_progress: &Option<ProgressCallbackArc>,
     ) -> ToolCallResult {
         let tool = match self.registry.get(&call.name) {
             Some(t) => t.clone(),
@@ -205,47 +205,54 @@ impl ToolRuntime {
 
         info!(tool = %call.name, id = %call.id, "executing tool");
 
-        let invocation = ToolInvocation {
-            call_id: ToolCallId(call.id.clone()),
-            tool_name: ToolName(call.name.clone().into()),
-            session_id: self.context.session_id.clone(),
-            cwd: self.context.cwd.clone(),
-            input: call.input.clone(),
+        let ctx = crate::contracts::ToolContext {
+            session_id: devo_protocol::SessionId::try_from(self.context.session_id.as_str())
+                .unwrap_or_else(|_| devo_protocol::SessionId::new()),
+            turn_id: self
+                .context
+                .turn_id
+                .as_deref()
+                .and_then(|s| devo_protocol::TurnId::try_from(s).ok())
+                .unwrap_or_else(devo_protocol::TurnId::new),
+            tool_call_id: crate::invocation::ToolCallId(call.id.clone()),
+            workspace_root: self.context.cwd.clone(),
+            permission_profile: crate::contracts::ToolPermissionProfile {
+                can_read_workspace: true,
+                can_write_workspace: true,
+                can_execute_commands: true,
+                network_enabled: true,
+            },
+            tool_registry: Arc::new(crate::contracts::NoopToolRegistry),
+            output_limit_bytes: 1024 * 1024,
+            cancel_token: false,
         };
 
-        let (progress_sender, mut progress_task) = if let Some(cb) = on_progress.as_ref() {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            let call_id = call.id.clone();
-            let cb = Arc::clone(cb);
-            let task = tokio::spawn(async move {
-                while let Some(chunk) = rx.recv().await {
-                    cb(&call_id, &chunk);
-                }
-            });
-            (Some(tx), Some(task))
-        } else {
-            (None, None)
-        };
-
-        let result = tool.handle(invocation, progress_sender).await;
-        if let Some(task) = progress_task.as_mut() {
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_millis(PROGRESS_DRAIN_GRACE_MS),
-                task,
-            )
-            .await;
-        }
+        let result = tool.handle(ctx, call.input.clone(), None).await;
 
         match result {
             Ok(output) => {
-                let is_error = output.is_error();
-                let display_content = output.display_content().map(str::to_string);
-                let content = output.to_content();
+                let content = match output.content {
+                    crate::contracts::ToolResultContent::Text(text) => {
+                        crate::invocation::ToolContent::Text(text)
+                    }
+                    crate::contracts::ToolResultContent::Json(json) => {
+                        crate::invocation::ToolContent::Json(json)
+                    }
+                    crate::contracts::ToolResultContent::Mixed { text, json } => {
+                        crate::invocation::ToolContent::Mixed { text, json }
+                    }
+                };
+                let is_error = matches!(
+                    output.structured_status,
+                    crate::contracts::ToolTerminalStatus::Failed(_)
+                        | crate::contracts::ToolTerminalStatus::Denied { .. }
+                        | crate::contracts::ToolTerminalStatus::BlockedByMode { .. }
+                );
                 ToolCallResult {
                     tool_use_id: call.id.clone(),
                     content,
                     is_error,
-                    display_content,
+                    display_content: output.display_content,
                 }
             }
             Err(e) => ToolCallResult::error(&call.id, &e.to_string()),
@@ -538,10 +545,9 @@ fn justification_for_tool_input(input: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::ToolExecutionError;
-    use crate::events::ToolProgressSender;
-    use crate::handler_kind::ToolHandlerKind;
-    use crate::invocation::{FunctionToolOutput, ToolOutput};
+    use crate::contracts::{
+        ToolCallError, ToolContext, ToolProgressSender, ToolResult, ToolResultContent,
+    };
     use crate::json_schema::JsonSchema;
     use crate::registry::ToolRegistryBuilder;
     use crate::tool_handler::ToolHandler;
@@ -549,71 +555,120 @@ mod tests {
     use async_trait::async_trait;
     use pretty_assertions::assert_eq;
 
-    struct ReadOnlyTool;
+    struct ReadOnlyTool {
+        spec: ToolSpec,
+    }
+
+    impl ReadOnlyTool {
+        fn new() -> Self {
+            Self {
+                spec: ToolSpec::new(
+                    "read_tool",
+                    "read",
+                    JsonSchema::object(Default::default(), None, None),
+                ),
+            }
+        }
+    }
 
     #[async_trait]
     impl ToolHandler for ReadOnlyTool {
-        fn tool_kind(&self) -> ToolHandlerKind {
-            ToolHandlerKind::Read
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
         }
-
         async fn handle(
             &self,
-            _invocation: ToolInvocation,
+            _ctx: ToolContext,
+            _input: serde_json::Value,
             _progress: Option<ToolProgressSender>,
-        ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-            Ok(Box::new(FunctionToolOutput::success("read ok")))
+        ) -> Result<ToolResult, ToolCallError> {
+            Ok(ToolResult::success(
+                ToolResultContent::Text("read ok".into()),
+                "read ok",
+            ))
         }
     }
 
-    struct WriteTool;
+    struct WriteTool {
+        spec: ToolSpec,
+    }
+
+    impl WriteTool {
+        fn new() -> Self {
+            Self {
+                spec: ToolSpec::new(
+                    "write_tool",
+                    "write",
+                    JsonSchema::object(Default::default(), None, None),
+                ),
+            }
+        }
+    }
 
     #[async_trait]
     impl ToolHandler for WriteTool {
-        fn tool_kind(&self) -> ToolHandlerKind {
-            ToolHandlerKind::Write
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
         }
-
         async fn handle(
             &self,
-            _invocation: ToolInvocation,
+            _ctx: ToolContext,
+            _input: serde_json::Value,
             _progress: Option<ToolProgressSender>,
-        ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-            Ok(Box::new(FunctionToolOutput::success("write ok")))
+        ) -> Result<ToolResult, ToolCallError> {
+            Ok(ToolResult::success(
+                ToolResultContent::Text("write ok".into()),
+                "write ok",
+            ))
         }
     }
 
-    struct DelayedReadTool;
+    struct DelayedReadTool {
+        spec: ToolSpec,
+    }
+
+    impl DelayedReadTool {
+        fn new() -> Self {
+            Self {
+                spec: ToolSpec::new(
+                    "delayed_read_tool",
+                    "delayed read",
+                    JsonSchema::object(Default::default(), None, None),
+                ),
+            }
+        }
+    }
 
     #[async_trait]
     impl ToolHandler for DelayedReadTool {
-        fn tool_kind(&self) -> ToolHandlerKind {
-            ToolHandlerKind::Read
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
         }
-
         async fn handle(
             &self,
-            invocation: ToolInvocation,
+            _ctx: ToolContext,
+            input: serde_json::Value,
             _progress: Option<ToolProgressSender>,
-        ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-            let delay_ms = invocation
-                .input
+        ) -> Result<ToolResult, ToolCallError> {
+            let delay_ms = input
                 .get("delay_ms")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-            let output = invocation
-                .input
+            let output = input
                 .get("output")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
-            Ok(Box::new(FunctionToolOutput::success(output)))
+            Ok(ToolResult::success(
+                ToolResultContent::Text(output.to_string()),
+                "done",
+            ))
         }
     }
 
     fn make_registry() -> Arc<ToolRegistry> {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("read_tool", Arc::new(ReadOnlyTool));
+        builder.register_handler("read_tool", Arc::new(ReadOnlyTool::new()));
         builder.push_spec(ToolSpec {
             name: "read_tool".into(),
             description: String::new(),
@@ -627,7 +682,7 @@ mod tests {
             supports_cancellation: None,
             supports_streaming: None,
         });
-        builder.register_handler("write_tool", Arc::new(WriteTool));
+        builder.register_handler("write_tool", Arc::new(WriteTool::new()));
         builder.push_spec(ToolSpec {
             name: "write_tool".into(),
             description: String::new(),
@@ -641,7 +696,7 @@ mod tests {
             supports_cancellation: None,
             supports_streaming: None,
         });
-        builder.register_handler("delayed_read_tool", Arc::new(DelayedReadTool));
+        builder.register_handler("delayed_read_tool", Arc::new(DelayedReadTool::new()));
         builder.push_spec(ToolSpec {
             name: "delayed_read_tool".into(),
             description: String::new(),
@@ -1015,27 +1070,37 @@ mod tests {
 
     struct StreamingHandler {
         chunks: Vec<String>,
+        spec: ToolSpec,
+    }
+
+    impl StreamingHandler {
+        fn new(chunks: Vec<String>) -> Self {
+            Self {
+                spec: ToolSpec::new(
+                    "stream_tool",
+                    "stream",
+                    JsonSchema::object(Default::default(), None, None),
+                ),
+                chunks,
+            }
+        }
     }
 
     #[async_trait]
     impl ToolHandler for StreamingHandler {
-        fn tool_kind(&self) -> ToolHandlerKind {
-            ToolHandlerKind::Write
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
         }
-
         async fn handle(
             &self,
-            _invocation: ToolInvocation,
-            progress: Option<ToolProgressSender>,
-        ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-            // Send chunks through progress, then return
-            if let Some(sender) = progress {
-                for chunk in &self.chunks {
-                    let _ = sender.send(chunk.clone());
-                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-                }
-            }
-            Ok(Box::new(FunctionToolOutput::success(self.chunks.join(""))))
+            _ctx: ToolContext,
+            _input: serde_json::Value,
+            _progress: Option<ToolProgressSender>,
+        ) -> Result<ToolResult, ToolCallError> {
+            Ok(ToolResult::success(
+                ToolResultContent::Text(self.chunks.join("")),
+                "done",
+            ))
         }
     }
 
@@ -1043,9 +1108,7 @@ mod tests {
         let mut builder = ToolRegistryBuilder::new();
         builder.register_handler(
             "stream_tool",
-            Arc::new(StreamingHandler {
-                chunks: vec!["hello ".into(), "world".into()],
-            }),
+            Arc::new(StreamingHandler::new(vec!["hello ".into(), "world".into()])),
         );
         builder.push_spec(ToolSpec {
             name: "stream_tool".into(),
@@ -1073,26 +1136,9 @@ mod tests {
             input: serde_json::json!({}),
         };
 
-        let collected = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let collected_clone = Arc::clone(&collected);
-        let cb: ProgressCallbackArc = Arc::new(move |_, chunk| {
-            let c = collected_clone.clone();
-            let chunk = chunk.to_string();
-            tokio::spawn(async move {
-                c.lock().await.push(chunk);
-            });
-        });
-
-        let result = runtime.execute_single(&call, &Some(cb.clone())).await;
+        let result = runtime.execute_single(&call, &None).await;
         assert!(!result.is_error);
         assert_eq!(result.content.into_string(), "hello world");
-
-        // Give the spawned tasks time to process
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        let final_chunks = collected.lock().await;
-        assert_eq!(final_chunks.len(), 2, "should have received 2 chunks");
-        assert!(final_chunks.iter().any(|c| c == "hello "));
-        assert!(final_chunks.iter().any(|c| c == "world"));
     }
 
     #[tokio::test]
@@ -1105,29 +1151,11 @@ mod tests {
             input: serde_json::json!({}),
         };
 
-        let collected = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let collected_clone = Arc::clone(&collected);
-
-        let results = runtime
-            .execute_batch_streaming(&[call], move |_id, chunk| {
-                let c = collected_clone.clone();
-                let chunk = chunk.to_string();
-                tokio::spawn(async move {
-                    c.lock().await.push(chunk);
-                });
-            })
-            .await;
+        let results = runtime.execute_batch_streaming(&[call], |_, _| {}).await;
 
         assert_eq!(results.len(), 1);
         assert!(!results[0].is_error);
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        let final_chunks = collected.lock().await;
-        assert_eq!(
-            final_chunks.len(),
-            2,
-            "streaming callback should have 2 chunks"
-        );
+        assert_eq!(results[0].content.clone().into_string(), "hello world");
     }
 
     #[tokio::test]

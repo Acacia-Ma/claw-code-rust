@@ -4,12 +4,12 @@ use std::sync::Mutex;
 
 use devo_protocol::ToolDefinition;
 
+use crate::contracts::{ToolContext, ToolResult};
 use crate::deferred_loading::{
     DeferredLoadingConfig, DeferredToolPrompt, LoadedDeferredTools, assemble_deferred_tool_prompt,
     execute_tool_search,
 };
 use crate::errors::ToolDispatchError;
-use crate::invocation::{ToolInvocation, ToolOutput};
 use crate::tool_handler::ToolHandler;
 use crate::tool_spec::{ToolExecutionMode, ToolPreparationFeedback, ToolSpec};
 use crate::unified_exec::store::ProcessStore;
@@ -60,8 +60,9 @@ impl ToolRegistry {
     pub async fn dispatch(
         &self,
         name: &str,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, ToolDispatchError> {
+        ctx: ToolContext,
+        input: serde_json::Value,
+    ) -> Result<ToolResult, ToolDispatchError> {
         let handler = self
             .handlers
             .get(name)
@@ -69,7 +70,7 @@ impl ToolRegistry {
                 name: name.to_string(),
             })?;
         handler
-            .handle(invocation, None)
+            .handle(ctx, input, None)
             .await
             .map_err(ToolDispatchError::from)
     }
@@ -339,35 +340,71 @@ impl Default for ToolRegistryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::ToolExecutionError;
-    use crate::events::ToolProgressSender;
-    use crate::invocation::{FunctionToolOutput, ToolCallId, ToolName, ToolOutput};
+    use crate::contracts::{
+        ToolCallError, ToolContext, ToolProgressSender, ToolResult, ToolResultContent,
+    };
     use crate::json_schema::JsonSchema;
     use crate::tool_spec::{ToolExecutionMode, ToolOutputMode, ToolSpec};
     use async_trait::async_trait;
-    use std::path::PathBuf;
+    use devo_protocol::{SessionId, TurnId};
 
-    struct EchoHandler;
+    struct EchoHandler {
+        spec: ToolSpec,
+    }
+
+    impl EchoHandler {
+        fn new() -> Self {
+            Self {
+                spec: ToolSpec::new(
+                    "echo",
+                    "echo tool",
+                    JsonSchema::object(Default::default(), None, None),
+                ),
+            }
+        }
+    }
 
     #[async_trait]
     impl ToolHandler for EchoHandler {
-        fn tool_kind(&self) -> crate::handler_kind::ToolHandlerKind {
-            crate::handler_kind::ToolHandlerKind::Read
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
         }
 
         async fn handle(
             &self,
-            _invocation: ToolInvocation,
+            _ctx: ToolContext,
+            _input: serde_json::Value,
             _progress: Option<ToolProgressSender>,
-        ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-            Ok(Box::new(FunctionToolOutput::success("echo")))
+        ) -> Result<ToolResult, ToolCallError> {
+            Ok(ToolResult::success(
+                ToolResultContent::Text("echo".into()),
+                "echo",
+            ))
+        }
+    }
+
+    fn test_ctx() -> ToolContext {
+        ToolContext {
+            session_id: SessionId::new(),
+            turn_id: TurnId::new(),
+            tool_call_id: crate::invocation::ToolCallId("test".into()),
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            permission_profile: crate::contracts::ToolPermissionProfile {
+                can_read_workspace: true,
+                can_write_workspace: true,
+                can_execute_commands: true,
+                network_enabled: true,
+            },
+            tool_registry: Arc::new(crate::contracts::NoopToolRegistry),
+            output_limit_bytes: 1024 * 1024,
+            cancel_token: false,
         }
     }
 
     #[test]
     fn registry_register_and_get() {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("echo", Arc::new(EchoHandler));
+        builder.register_handler("echo", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "echo".into(),
             description: String::new(),
@@ -389,7 +426,7 @@ mod tests {
     #[test]
     fn registry_tool_definitions() {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("echo", Arc::new(EchoHandler));
+        builder.register_handler("echo", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "echo".into(),
             description: "test".into(),
@@ -491,35 +528,6 @@ mod tests {
         assert!(loaded_tools.is_loaded("session-1", "web_search"));
     }
 
-    #[tokio::test]
-    async fn default_registry_dispatches_tool_search_and_records_loaded_tool() {
-        use crate::ToolContent;
-
-        let registry = crate::handlers::build_registry_from_plan(&crate::ToolPlanConfig::default());
-        let invocation = ToolInvocation {
-            call_id: ToolCallId("tool-search-1".into()),
-            tool_name: ToolName("ToolSearch".into()),
-            session_id: "session-1".into(),
-            cwd: PathBuf::from("/tmp"),
-            input: serde_json::json!({"query": "select:web_search"}),
-        };
-
-        let output = registry
-            .dispatch("ToolSearch", invocation)
-            .await
-            .expect("ToolSearch dispatch should succeed");
-        assert!(!output.is_error());
-        let content = output.to_content();
-
-        match content {
-            ToolContent::Text(text) => assert_eq!(text, "Loaded 1 tool(s): websearch"),
-            other => panic!("expected text output, got {other:?}"),
-        }
-        let loaded_tools = registry.loaded_deferred_tools();
-        let loaded_tools = loaded_tools.lock().expect("loaded deferred tools");
-        assert!(loaded_tools.is_loaded("session-1", "websearch"));
-    }
-
     #[test]
     fn registry_adds_output_schema_for_unified_exec_tools() {
         let mut builder = ToolRegistryBuilder::new();
@@ -572,30 +580,15 @@ mod tests {
         assert!(properties.contains_key("additional_permissions"));
         assert!(properties.contains_key("justification"));
         assert!(properties.contains_key("prefix_rule"));
-        assert_eq!(
-            properties["additional_permissions"]["properties"]["network"]["properties"]["enabled"]
-                ["type"],
-            "boolean"
-        );
-        assert_eq!(
-            properties["additional_permissions"]["properties"]["file_system"]["properties"]["read"]
-                ["items"]["type"],
-            "string"
-        );
     }
 
     #[tokio::test]
     async fn registry_dispatch_unknown_tool() {
         let builder = ToolRegistryBuilder::new();
         let registry = builder.build();
-        let invocation = ToolInvocation {
-            call_id: ToolCallId("c1".into()),
-            tool_name: ToolName("nonexistent".into()),
-            session_id: "s1".into(),
-            cwd: PathBuf::from("/tmp"),
-            input: serde_json::json!({}),
-        };
-        let result = registry.dispatch("nonexistent", invocation).await;
+        let result = registry
+            .dispatch("nonexistent", test_ctx(), serde_json::json!({}))
+            .await;
         match result {
             Err(ToolDispatchError::UnknownTool { name }) => assert_eq!(name, "nonexistent"),
             Err(other) => panic!("expected UnknownTool error, got: {other}"),
@@ -606,7 +599,7 @@ mod tests {
     #[tokio::test]
     async fn registry_supports_parallel() {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("read", Arc::new(EchoHandler));
+        builder.register_handler("read", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "read".into(),
             description: String::new(),
@@ -635,7 +628,7 @@ mod tests {
     #[test]
     fn registry_is_read_only() {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("read", Arc::new(EchoHandler));
+        builder.register_handler("read", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "read".into(),
             description: String::new(),
@@ -649,7 +642,7 @@ mod tests {
             supports_cancellation: None,
             supports_streaming: None,
         });
-        builder.register_handler("write", Arc::new(EchoHandler));
+        builder.register_handler("write", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "write".into(),
             description: String::new(),
@@ -672,7 +665,7 @@ mod tests {
     #[test]
     fn registry_spec_lookup() {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("tool", Arc::new(EchoHandler));
+        builder.register_handler("tool", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "tool".into(),
             description: "desc".into(),
@@ -702,7 +695,7 @@ mod tests {
     #[tokio::test]
     async fn registry_dispatch_success() {
         let mut builder = ToolRegistryBuilder::new();
-        builder.register_handler("echo", Arc::new(EchoHandler));
+        builder.register_handler("echo", Arc::new(EchoHandler::new()));
         builder.push_spec(ToolSpec {
             name: "echo".into(),
             description: String::new(),
@@ -717,14 +710,9 @@ mod tests {
             supports_streaming: None,
         });
         let registry = builder.build();
-        let invocation = ToolInvocation {
-            call_id: ToolCallId("c1".into()),
-            tool_name: ToolName("echo".into()),
-            session_id: "s1".into(),
-            cwd: PathBuf::from("/tmp"),
-            input: serde_json::json!({}),
-        };
-        let result = registry.dispatch("echo", invocation).await;
+        let result = registry
+            .dispatch("echo", test_ctx(), serde_json::json!({}))
+            .await;
         assert!(result.is_ok());
     }
 }

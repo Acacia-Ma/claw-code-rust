@@ -63,21 +63,21 @@ pub fn build_registry_from_plan(config: &ToolPlanConfig) -> crate::registry::Too
 
     for (kind, name) in plan.handlers {
         let handler: Arc<dyn ToolHandler> = match kind {
-            ToolHandlerKind::Bash => Arc::new(BashHandler),
-            ToolHandlerKind::ShellCommand => Arc::new(ShellCommandHandler),
-            ToolHandlerKind::Read => Arc::new(ReadHandler),
-            ToolHandlerKind::Write => Arc::new(WriteHandler),
-            ToolHandlerKind::Glob => Arc::new(GlobHandler),
-            ToolHandlerKind::Grep => Arc::new(GrepHandler),
-            ToolHandlerKind::ApplyPatch => Arc::new(ApplyPatchHandler),
-            ToolHandlerKind::Plan => Arc::new(PlanHandler),
-            ToolHandlerKind::Question => Arc::new(QuestionHandler),
-            ToolHandlerKind::Task => Arc::new(TaskHandler),
-            ToolHandlerKind::WebFetch => Arc::new(WebFetchHandler),
-            ToolHandlerKind::WebSearch => Arc::new(WebSearchHandler),
-            ToolHandlerKind::Skill => Arc::new(SkillHandler),
-            ToolHandlerKind::Lsp => Arc::new(LspHandler),
-            ToolHandlerKind::Invalid => Arc::new(InvalidHandler),
+            ToolHandlerKind::Bash => Arc::new(BashHandler::new()),
+            ToolHandlerKind::ShellCommand => Arc::new(ShellCommandHandler::new()),
+            ToolHandlerKind::Read => Arc::new(ReadHandler::new()),
+            ToolHandlerKind::Write => Arc::new(WriteHandler::new()),
+            ToolHandlerKind::Glob => Arc::new(GlobHandler::new()),
+            ToolHandlerKind::Grep => Arc::new(GrepHandler::new()),
+            ToolHandlerKind::ApplyPatch => Arc::new(ApplyPatchHandler::new()),
+            ToolHandlerKind::Plan => Arc::new(PlanHandler::new()),
+            ToolHandlerKind::Question => Arc::new(QuestionHandler::new()),
+            ToolHandlerKind::Task => Arc::new(TaskHandler::new()),
+            ToolHandlerKind::WebFetch => Arc::new(WebFetchHandler::new()),
+            ToolHandlerKind::WebSearch => Arc::new(WebSearchHandler::new()),
+            ToolHandlerKind::Skill => Arc::new(SkillHandler::new()),
+            ToolHandlerKind::Lsp => Arc::new(LspHandler::new()),
+            ToolHandlerKind::Invalid => Arc::new(InvalidHandler::new()),
             ToolHandlerKind::ExecCommand => {
                 Arc::new(ExecCommandHandler::new(Arc::clone(&process_store)))
             }

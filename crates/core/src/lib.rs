@@ -26,7 +26,27 @@ mod session_store;
 mod skills;
 mod state;
 mod tool_prompt;
+pub mod tools;
 mod update_check;
+
+#[cfg(test)]
+pub(crate) use tools::ToolContent;
+pub(crate) use tools::apply_patch;
+pub(crate) use tools::contracts;
+pub(crate) use tools::deferred_loading;
+pub(crate) use tools::errors;
+pub(crate) use tools::events;
+pub(crate) use tools::handler_kind;
+pub(crate) use tools::invocation;
+pub(crate) use tools::json_schema;
+pub(crate) use tools::read;
+pub(crate) use tools::registry;
+pub(crate) use tools::registry_plan;
+pub(crate) use tools::shell_exec;
+pub(crate) use tools::tool_handler;
+pub(crate) use tools::tool_spec;
+pub(crate) use tools::tool_summary;
+pub(crate) use tools::unified_exec;
 
 pub use config::*;
 pub use context::*;

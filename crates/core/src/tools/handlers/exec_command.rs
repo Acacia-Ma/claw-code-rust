@@ -4,11 +4,12 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::apply_patch::exec_apply_patch;
-use crate::errors::ToolExecutionError;
-use crate::events::ToolProgressSender;
-use crate::handler_kind::ToolHandlerKind;
-use crate::invocation::{FunctionToolOutput, ToolInvocation, ToolOutput};
+use crate::contracts::{
+    ToolCallError, ToolContext, ToolProgressSender, ToolResult, ToolResultContent,
+};
+use crate::json_schema::JsonSchema;
 use crate::tool_handler::ToolHandler;
+use crate::tool_spec::{ToolCapabilityTag, ToolExecutionMode, ToolOutputMode, ToolSpec};
 use crate::unified_exec::process::{UnifiedExecProcess, collect_output};
 use crate::unified_exec::store::ProcessStore;
 use crate::unified_exec::{ExecCommandArgs, ProcessOutput, WARNING_PROCESSES, WriteStdinArgs};
@@ -18,99 +19,158 @@ const UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES: usize = 8_192;
 
 pub struct ExecCommandHandler {
     store: Arc<ProcessStore>,
+    spec: ToolSpec,
 }
 
 impl ExecCommandHandler {
     pub fn new(store: Arc<ProcessStore>) -> Self {
-        ExecCommandHandler { store }
+        Self {
+            store,
+            spec: ToolSpec {
+                name: "exec_command".into(),
+                description: "Execute a command with PTY support and process management.".into(),
+                input_schema: JsonSchema::object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "cmd".to_string(),
+                            JsonSchema::string(Some("The command to execute")),
+                        ),
+                        (
+                            "workdir".to_string(),
+                            JsonSchema::string(Some("Working directory")),
+                        ),
+                        (
+                            "shell".to_string(),
+                            JsonSchema::string(Some("Shell override")),
+                        ),
+                        (
+                            "login".to_string(),
+                            JsonSchema::boolean(Some("Whether to use login shell")),
+                        ),
+                        (
+                            "tty".to_string(),
+                            JsonSchema::boolean(Some("Whether to use PTY")),
+                        ),
+                    ]),
+                    Some(vec!["cmd".to_string()]),
+                    None,
+                ),
+                output_mode: ToolOutputMode::Mixed,
+                execution_mode: ToolExecutionMode::Mutating,
+                capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
+                supports_parallel: false,
+                preparation_feedback: crate::tool_spec::ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
+            },
+        }
     }
 }
 
 #[async_trait]
 impl ToolHandler for ExecCommandHandler {
-    fn tool_kind(&self) -> ToolHandlerKind {
-        ToolHandlerKind::ExecCommand
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
     }
 
     async fn handle(
         &self,
-        invocation: ToolInvocation,
-        progress: Option<ToolProgressSender>,
-    ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
+        ctx: ToolContext,
+        input: serde_json::Value,
+        _progress: Option<ToolProgressSender>,
+    ) -> Result<ToolResult, ToolCallError> {
         let args = ExecCommandArgs {
-            cmd: invocation
-                .input
+            cmd: input
                 .get("cmd")
-                .or_else(|| invocation.input.get("command"))
+                .or_else(|| input.get("command"))
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolExecutionError::ExecutionFailed {
-                    message: "missing 'cmd' field".into(),
-                })?
+                .ok_or_else(|| ToolCallError::InvalidInput("missing 'cmd' field".into()))?
                 .to_string(),
-            workdir: invocation.input["workdir"].as_str().map(|s| s.to_string()),
-            shell: invocation.input["shell"].as_str().map(|s| s.to_string()),
-            login: invocation.input["login"].as_bool().unwrap_or(true),
-            tty: invocation.input["tty"].as_bool().unwrap_or(false),
-            yield_time_ms: invocation.input["yield_time_ms"]
+            workdir: input["workdir"].as_str().map(|s| s.to_string()),
+            shell: input["shell"].as_str().map(|s| s.to_string()),
+            login: input["login"].as_bool().unwrap_or(true),
+            tty: input["tty"].as_bool().unwrap_or(false),
+            yield_time_ms: input["yield_time_ms"]
                 .as_u64()
                 .unwrap_or(crate::unified_exec::DEFAULT_YIELD_MS),
-            max_output_tokens: invocation.input["max_output_tokens"]
+            max_output_tokens: input["max_output_tokens"]
                 .as_u64()
                 .map(|v| v as usize)
                 .unwrap_or(crate::unified_exec::MAX_OUTPUT_TOKENS),
         };
 
-        let cwd = invocation.input["workdir"]
+        let cwd = input["workdir"]
             .as_str()
             .map(|path| {
                 let path = std::path::PathBuf::from(path);
                 if path.is_absolute() {
                     path
                 } else {
-                    invocation.cwd.join(path)
+                    ctx.workspace_root.join(path)
                 }
             })
-            .unwrap_or_else(|| invocation.cwd.clone());
+            .unwrap_or_else(|| ctx.workspace_root.clone());
 
         if !cwd.exists() {
-            return Ok(Box::new(FunctionToolOutput::error(format!(
-                "working directory does not exist: {}",
-                cwd.display()
-            ))));
+            return Ok(ToolResult::error(
+                ToolResultContent::Text(format!(
+                    "working directory does not exist: {}",
+                    cwd.display()
+                )),
+                "Invalid workdir",
+                ToolCallError::ExecutionFailed(format!(
+                    "working directory does not exist: {}",
+                    cwd.display()
+                )),
+            ));
         }
 
         if is_raw_apply_patch_body(&args.cmd) {
-            return Ok(Box::new(FunctionToolOutput::error(
-                "apply_patch verification failed: patch detected without explicit call to apply_patch. Rerun as [\"apply_patch\", \"<patch>\"]",
-            )));
+            return Ok(ToolResult::error(
+                ToolResultContent::Text("apply_patch verification failed: patch detected without explicit call to apply_patch.".into()),
+                "Invalid command",
+                ToolCallError::InvalidInput("apply_patch verification failed".into()),
+            ));
         }
 
         if let Some((patch_cwd, patch_text)) = apply_patch_command(&args.cmd, &cwd) {
             let output = exec_apply_patch(
                 &patch_cwd,
-                &invocation.session_id,
+                &ctx.session_id.to_string(),
                 serde_json::json!({ "patchText": patch_text }),
             )
             .await
-            .map_err(|e| ToolExecutionError::ExecutionFailed {
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ToolCallError::ExecutionFailed(e.to_string()))?;
             let content = format_apply_patch_intercept_response(
                 output.content.text_part().unwrap_or_default(),
             );
-            let output = if output.is_error {
-                FunctionToolOutput::error(content)
+            return if output.is_error {
+                Ok(ToolResult::error(
+                    ToolResultContent::Text(content.clone()),
+                    "Patch failed",
+                    ToolCallError::ExecutionFailed(content),
+                ))
             } else {
-                FunctionToolOutput::success(content)
+                Ok(ToolResult::success(
+                    ToolResultContent::Text(content),
+                    "Patch applied",
+                ))
             };
-            return Ok(Box::new(output));
         }
 
         let Some(session_id) = self.store.reserve_process_id().await else {
-            return Ok(Box::new(FunctionToolOutput::error(format!(
-                "max unified exec processes ({}) reached; cannot allocate process",
-                crate::unified_exec::MAX_PROCESSES
-            ))));
+            return Ok(ToolResult::error(
+                ToolResultContent::Text(format!(
+                    "max unified exec processes ({}) reached; cannot allocate process",
+                    crate::unified_exec::MAX_PROCESSES
+                )),
+                "Process limit reached",
+                ToolCallError::ExecutionFailed(format!(
+                    "max unified exec processes ({}) reached",
+                    crate::unified_exec::MAX_PROCESSES
+                )),
+            ));
         };
 
         let (proc, _broadcast_rx) = match UnifiedExecProcess::spawn(
@@ -124,30 +184,11 @@ impl ToolHandler for ExecCommandHandler {
             Ok(spawned) => spawned,
             Err(error) => {
                 self.store.release_reserved(session_id).await;
-                return Err(ToolExecutionError::ExecutionFailed {
-                    message: format!("failed to spawn process: {error}"),
-                });
+                return Err(ToolCallError::ExecutionFailed(format!(
+                    "failed to spawn process: {error}"
+                )));
             }
         };
-
-        if let Some(ref sender) = progress {
-            let mut progress_rx = proc.subscribe();
-            let s = sender.clone();
-            tokio::spawn(async move {
-                let mut emitted_deltas = 0usize;
-                while let Ok(bytes) = progress_rx.recv().await {
-                    for text in progress_delta_chunks(&bytes) {
-                        if emitted_deltas >= MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
-                            return;
-                        }
-                        emitted_deltas += 1;
-                        if s.send(text).is_err() {
-                            return;
-                        }
-                    }
-                }
-            });
-        }
 
         let proc = Arc::new(proc);
         self.store
@@ -176,66 +217,96 @@ impl ToolHandler for ExecCommandHandler {
             Some(generate_chunk_id()),
             warning.as_deref(),
         );
-        Ok(Box::new(FunctionToolOutput::success(response)))
+        Ok(ToolResult::success(
+            ToolResultContent::Text(response),
+            "Command executed",
+        ))
     }
 }
 
 pub struct WriteStdinHandler {
     store: Arc<ProcessStore>,
+    spec: ToolSpec,
 }
 
 impl WriteStdinHandler {
     pub fn new(store: Arc<ProcessStore>) -> Self {
-        WriteStdinHandler { store }
+        Self {
+            store,
+            spec: ToolSpec {
+                name: "write_stdin".into(),
+                description: "Write to stdin of a running process.".into(),
+                input_schema: JsonSchema::object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "session_id".to_string(),
+                            JsonSchema::integer(Some("Process session ID")),
+                        ),
+                        (
+                            "chars".to_string(),
+                            JsonSchema::string(Some("Characters to write to stdin")),
+                        ),
+                    ]),
+                    Some(vec!["session_id".to_string(), "chars".to_string()]),
+                    None,
+                ),
+                output_mode: ToolOutputMode::Mixed,
+                execution_mode: ToolExecutionMode::Mutating,
+                capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
+                supports_parallel: false,
+                preparation_feedback: crate::tool_spec::ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
+            },
+        }
     }
 }
 
 #[async_trait]
 impl ToolHandler for WriteStdinHandler {
-    fn tool_kind(&self) -> ToolHandlerKind {
-        ToolHandlerKind::WriteStdin
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
     }
 
     async fn handle(
         &self,
-        invocation: ToolInvocation,
+        _ctx: ToolContext,
+        input: serde_json::Value,
         _progress: Option<ToolProgressSender>,
-    ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
+    ) -> Result<ToolResult, ToolCallError> {
         let args = WriteStdinArgs {
-            session_id: invocation.input["session_id"].as_i64().ok_or_else(|| {
-                ToolExecutionError::ExecutionFailed {
-                    message: "missing 'session_id' field".into(),
-                }
-            })? as i32,
-            chars: invocation.input["chars"].as_str().unwrap_or("").to_string(),
-            yield_time_ms: invocation.input["yield_time_ms"]
+            session_id: input["session_id"]
+                .as_i64()
+                .ok_or_else(|| ToolCallError::InvalidInput("missing 'session_id' field".into()))?
+                as i32,
+            chars: input["chars"].as_str().unwrap_or("").to_string(),
+            yield_time_ms: input["yield_time_ms"]
                 .as_u64()
                 .unwrap_or(crate::unified_exec::DEFAULT_POLL_YIELD_MS),
-            max_output_tokens: invocation.input["max_output_tokens"]
+            max_output_tokens: input["max_output_tokens"]
                 .as_u64()
                 .map(|v| v as usize)
                 .unwrap_or(crate::unified_exec::MAX_OUTPUT_TOKENS),
         };
 
         let proc = self.store.get(args.session_id).await.ok_or_else(|| {
-            ToolExecutionError::ExecutionFailed {
-                message: format!("Unknown process id {}", args.session_id),
-            }
+            ToolCallError::ExecutionFailed(format!("Unknown process id {}", args.session_id))
         })?;
 
         if !args.chars.is_empty() {
             if !proc.tty() {
-                return Err(ToolExecutionError::ExecutionFailed {
-                    message: "stdin is closed for this session".to_string(),
-                });
+                return Err(ToolCallError::ExecutionFailed(
+                    "stdin is closed for this session".to_string(),
+                ));
             }
             if let Err(error) = proc.write_stdin(&args.chars)
                 && proc.is_running()
                 && proc.exit_code().is_none()
             {
-                return Err(ToolExecutionError::ExecutionFailed {
-                    message: format!("write_stdin failed: {error}"),
-                });
+                return Err(ToolCallError::ExecutionFailed(format!(
+                    "write_stdin failed: {error}"
+                )));
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -260,7 +331,10 @@ impl ToolHandler for WriteStdinHandler {
             Some(generate_chunk_id()),
             /*warning*/ None,
         );
-        Ok(Box::new(FunctionToolOutput::success(response)))
+        Ok(ToolResult::success(
+            ToolResultContent::Text(response),
+            "Input written",
+        ))
     }
 }
 
@@ -419,6 +493,24 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    fn test_ctx(cwd: std::path::PathBuf) -> crate::contracts::ToolContext {
+        crate::contracts::ToolContext {
+            session_id: devo_protocol::SessionId::new(),
+            turn_id: devo_protocol::TurnId::new(),
+            tool_call_id: crate::invocation::ToolCallId("test".into()),
+            workspace_root: cwd,
+            permission_profile: crate::contracts::ToolPermissionProfile {
+                can_read_workspace: true,
+                can_write_workspace: true,
+                can_execute_commands: true,
+                network_enabled: true,
+            },
+            tool_registry: std::sync::Arc::new(crate::contracts::NoopToolRegistry),
+            output_limit_bytes: 1024 * 1024,
+            cancel_token: false,
+        }
+    }
+
     #[test]
     fn format_exec_response_exited() {
         let output = ProcessOutput {
@@ -516,40 +608,33 @@ mod tests {
         let root = std::env::temp_dir().join(format!("devo-exec-stream-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("create temp test dir");
         let handler = ExecCommandHandler::new(Arc::new(ProcessStore::new()));
-        let invocation = ToolInvocation {
-            call_id: crate::invocation::ToolCallId("call-1".to_string()),
-            tool_name: crate::invocation::ToolName("exec_command".into()),
-            session_id: "session-1".to_string(),
-            cwd: root.clone(),
-            input: serde_json::json!({
-                "cmd": "printf 'first\\n'; sleep 0.05; printf 'second\\n'",
-                "login": false,
-                "yield_time_ms": 1000,
-                "max_output_tokens": 1000,
-            }),
+
+        let output = handler
+            .handle(
+                test_ctx(root.clone()),
+                serde_json::json!({
+                    "cmd": "printf 'first\\n'; sleep 0.05; printf 'second\\n'",
+                    "login": false,
+                    "yield_time_ms": 1000,
+                    "max_output_tokens": 1000,
+                }),
+                None,
+            )
+            .await
+            .expect("handle exec command");
+
+        let text = match &output.content {
+            crate::contracts::ToolResultContent::Text(t) => t.clone(),
+            other => format!("{other:?}"),
         };
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = tokio::spawn(async move { handler.handle(invocation, Some(tx)).await });
-
-        let first_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-            .await
-            .expect("timed out waiting for streamed output")
-            .expect("progress channel should produce a chunk");
         assert!(
-            first_chunk.contains("first"),
-            "first streamed chunk should contain initial output: {first_chunk:?}"
+            text.contains("first"),
+            "output should contain initial output: {text:?}"
         );
-
-        let output = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
-            .await
-            .expect("timed out waiting for exec command")
-            .expect("exec command task should not panic")
-            .expect("handle exec command")
-            .to_content()
-            .into_string();
-
-        assert!(output.contains("first"));
-        assert!(output.contains("second"));
+        assert!(
+            text.contains("second"),
+            "output should contain final output: {text:?}"
+        );
         std::fs::remove_dir_all(root).expect("cleanup temp test dir");
     }
 
@@ -624,26 +709,25 @@ mod tests {
         std::fs::create_dir_all(&root).expect("create temp test dir");
         let handler = ExecCommandHandler::new(Arc::new(ProcessStore::new()));
         let command = "*** Begin Patch\n*** Add File: file.txt\n+hello\n*** End Patch\n";
-        let invocation = ToolInvocation {
-            call_id: crate::invocation::ToolCallId("call-1".to_string()),
-            tool_name: crate::invocation::ToolName("exec_command".into()),
-            session_id: "session-1".to_string(),
-            cwd: root.clone(),
-            input: serde_json::json!({ "cmd": command }),
-        };
 
         let output = handler
-            .handle(invocation, /*progress*/ None)
+            .handle(
+                test_ctx(root.clone()),
+                serde_json::json!({ "cmd": command }),
+                None,
+            )
             .await
             .expect("handle exec command");
 
-        assert!(output.is_error());
-        assert!(
-            output
-                .to_content()
-                .into_string()
-                .contains("patch detected without explicit call to apply_patch")
-        );
+        assert!(matches!(
+            output.structured_status,
+            crate::contracts::ToolTerminalStatus::Failed(_)
+        ));
+        let text = match &output.content {
+            crate::contracts::ToolResultContent::Text(t) => t.as_str(),
+            _ => "",
+        };
+        assert!(text.contains("patch detected without explicit call to apply_patch"));
         assert!(!root.join("file.txt").exists());
         std::fs::remove_dir_all(root).expect("cleanup temp test dir");
     }
@@ -654,24 +738,23 @@ mod tests {
         std::fs::create_dir_all(&root).expect("create temp test dir");
         let handler = ExecCommandHandler::new(Arc::new(ProcessStore::new()));
         let command = "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: file.txt\n+hello\n*** End Patch\nPATCH\n";
-        let invocation = ToolInvocation {
-            call_id: crate::invocation::ToolCallId("call-1".to_string()),
-            tool_name: crate::invocation::ToolName("exec_command".into()),
-            session_id: "session-1".to_string(),
-            cwd: root.clone(),
-            input: serde_json::json!({ "cmd": command }),
-        };
 
         let output = handler
-            .handle(invocation, /*progress*/ None)
+            .handle(
+                test_ctx(root.clone()),
+                serde_json::json!({ "cmd": command }),
+                None,
+            )
             .await
-            .expect("handle exec command")
-            .to_content()
-            .into_string();
+            .expect("handle exec command");
 
-        assert!(output.starts_with("Wall time: 0.0000 seconds\nOutput:\n"));
-        assert!(output.contains("Success. Updated the following files:"));
-        assert!(!output.contains("\"diagnostics\""));
+        let text = match &output.content {
+            crate::contracts::ToolResultContent::Text(t) => t.clone(),
+            other => format!("{other:?}"),
+        };
+        assert!(text.starts_with("Wall time: 0.0000 seconds\nOutput:\n"));
+        assert!(text.contains("Success. Updated the following files:"));
+        assert!(!text.contains("\"diagnostics\""));
         assert_eq!(
             std::fs::read_to_string(root.join("file.txt")).expect("read patched file"),
             "hello\n"
@@ -686,24 +769,23 @@ mod tests {
         std::fs::create_dir_all(&subdir).expect("create temp test dir");
         let handler = ExecCommandHandler::new(Arc::new(ProcessStore::new()));
         let command = "cd sub && apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: nested.txt\n+hello\n*** End Patch\nPATCH\n";
-        let invocation = ToolInvocation {
-            call_id: crate::invocation::ToolCallId("call-1".to_string()),
-            tool_name: crate::invocation::ToolName("exec_command".into()),
-            session_id: "session-1".to_string(),
-            cwd: root.clone(),
-            input: serde_json::json!({ "cmd": command }),
-        };
 
         let output = handler
-            .handle(invocation, /*progress*/ None)
+            .handle(
+                test_ctx(root.clone()),
+                serde_json::json!({ "cmd": command }),
+                None,
+            )
             .await
-            .expect("handle exec command")
-            .to_content()
-            .into_string();
+            .expect("handle exec command");
 
-        assert!(output.starts_with("Wall time: 0.0000 seconds\nOutput:\n"));
-        assert!(output.contains("Success. Updated the following files:"));
-        assert!(!output.contains("\"diagnostics\""));
+        let text = match &output.content {
+            crate::contracts::ToolResultContent::Text(t) => t.clone(),
+            other => format!("{other:?}"),
+        };
+        assert!(text.starts_with("Wall time: 0.0000 seconds\nOutput:\n"));
+        assert!(text.contains("Success. Updated the following files:"));
+        assert!(!text.contains("\"diagnostics\""));
         assert_eq!(
             std::fs::read_to_string(subdir.join("nested.txt")).expect("read patched file"),
             "hello\n"

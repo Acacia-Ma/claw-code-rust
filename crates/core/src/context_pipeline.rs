@@ -60,6 +60,9 @@ impl ContextAssembler {
         turn_id: TurnId,
         base_instructions: &str,
         tool_schemas: &[(String, serde_json::Value)],
+        prior_transcript: &[(TurnId, ItemId)],
+        persona: Option<&str>,
+        interaction_mode: Option<&str>,
         project_instructions: &[String],
         active_skills: &[String],
         memory_context: Option<&str>,
@@ -84,11 +87,27 @@ impl ContextAssembler {
             });
         }
 
-        // Step 3: Prior transcript — placeholder for snapshot integration
-        // (full impl requires SessionProjection; add TranscriptRangeRef here)
+        // Step 3: Prior transcript references
+        for (turn_id, item_id) in prior_transcript {
+            entries.push(ContextEntry::TranscriptItemRef {
+                turn_id: *turn_id,
+                item_id: *item_id,
+            });
+        }
 
-        // Step 4: Metadata-derived instructions — placeholder
-        // persona, interaction_mode
+        // Step 4: Metadata-derived instructions (persona, interaction mode)
+        if let Some(persona_text) = persona {
+            entries.push(ContextEntry::InstructionRef {
+                source: InstructionSource::Persona("default".into()),
+                content: persona_text.to_string(),
+            });
+        }
+        if let Some(mode_text) = interaction_mode {
+            entries.push(ContextEntry::InstructionRef {
+                source: InstructionSource::InteractionMode("default".into()),
+                content: mode_text.to_string(),
+            });
+        }
 
         // Step 5: Project instructions
         for instr in project_instructions {
@@ -824,6 +843,9 @@ mod tests {
             "You are helpful.",
             &[],
             &[],
+            None,
+            None,
+            &[],
             &[],
             None,
             None,
@@ -844,6 +866,9 @@ mod tests {
             TurnId::new(),
             "base",
             &tools,
+            &[],
+            None,
+            None,
             &[],
             &[],
             None,
@@ -869,6 +894,9 @@ mod tests {
             turn_id,
             "base",
             &[],
+            &[],
+            None,
+            None,
             &[],
             &[],
             None,

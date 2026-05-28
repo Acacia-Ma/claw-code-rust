@@ -6,59 +6,94 @@ use diffy::create_patch;
 use serde_json::json;
 use tracing::info;
 
-use crate::errors::ToolExecutionError;
-use crate::events::ToolProgressSender;
-use crate::handler_kind::ToolHandlerKind;
-use crate::invocation::{FunctionToolOutput, ToolInvocation, ToolOutput};
+use crate::contracts::{
+    ToolCallError, ToolContext, ToolProgressSender, ToolResult, ToolResultContent,
+};
+use crate::json_schema::JsonSchema;
 use crate::tool_handler::ToolHandler;
+use crate::tool_spec::{ToolCapabilityTag, ToolExecutionMode, ToolOutputMode, ToolSpec};
 
-pub struct WriteHandler;
+pub struct WriteHandler {
+    spec: ToolSpec,
+}
+
+impl WriteHandler {
+    pub fn new() -> Self {
+        Self {
+            spec: ToolSpec {
+                name: "write".into(),
+                description: "Write a file to the local filesystem.".into(),
+                input_schema: JsonSchema::object(
+                    std::collections::BTreeMap::from([
+                        (
+                            "filePath".to_string(),
+                            JsonSchema::string(Some("The absolute path to the file to write")),
+                        ),
+                        (
+                            "content".to_string(),
+                            JsonSchema::string(Some("The content to write to the file")),
+                        ),
+                    ]),
+                    Some(vec!["filePath".to_string(), "content".to_string()]),
+                    None,
+                ),
+                output_mode: ToolOutputMode::Text,
+                execution_mode: ToolExecutionMode::Mutating,
+                capability_tags: vec![ToolCapabilityTag::WriteFiles],
+                supports_parallel: false,
+                preparation_feedback: crate::tool_spec::ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
+            },
+        }
+    }
+}
 
 #[async_trait]
 impl ToolHandler for WriteHandler {
-    fn tool_kind(&self) -> ToolHandlerKind {
-        ToolHandlerKind::Write
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
     }
 
     async fn handle(
         &self,
-        invocation: ToolInvocation,
+        ctx: ToolContext,
+        input: serde_json::Value,
         _progress: Option<ToolProgressSender>,
-    ) -> Result<Box<dyn ToolOutput>, ToolExecutionError> {
-        let path_str = invocation.input["filePath"].as_str().ok_or_else(|| {
-            ToolExecutionError::ExecutionFailed {
-                message: "missing 'filePath' field".into(),
-            }
-        })?;
-        let content = invocation.input["content"].as_str().ok_or_else(|| {
-            ToolExecutionError::ExecutionFailed {
-                message: "missing 'content' field".into(),
-            }
-        })?;
+    ) -> Result<ToolResult, ToolCallError> {
+        let path_str = input["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolCallError::InvalidInput("missing 'filePath' field".into()))?;
+        let content = input["content"]
+            .as_str()
+            .ok_or_else(|| ToolCallError::InvalidInput("missing 'content' field".into()))?;
 
-        let path = resolve_path(&invocation.cwd, path_str);
+        let path = resolve_path(&ctx.workspace_root, path_str);
         info!(path = %path.display(), bytes = content.len(), "writing file");
         let previous = tokio::fs::read_to_string(&path).await.ok();
 
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                ToolExecutionError::ExecutionFailed {
-                    message: format!("failed to create directories: {e}"),
-                }
+                ToolCallError::ExecutionFailed(format!("failed to create directories: {e}"))
             })?;
         }
 
-        tokio::fs::write(&path, content).await.map_err(|e| {
-            ToolExecutionError::ExecutionFailed {
-                message: format!("failed to write file: {e}"),
-            }
-        })?;
+        tokio::fs::write(&path, content)
+            .await
+            .map_err(|e| ToolCallError::ExecutionFailed(format!("failed to write file: {e}")))?;
 
         let metadata = build_write_metadata(&path, previous.as_deref(), content);
-        Ok(Box::new(FunctionToolOutput::success_with_metadata(
-            format!("wrote {} bytes to {}", content.len(), path.display()),
-            metadata,
-        )))
+        let summary = format!("wrote {} bytes to {}", content.len(), path.display());
+        let mut result = ToolResult::success(
+            ToolResultContent::Mixed {
+                text: Some(summary.clone()),
+                json: Some(metadata),
+            },
+            &summary,
+        );
+        result.display_content = Some(summary);
+        Ok(result)
     }
 }
 

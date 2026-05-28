@@ -4,12 +4,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
 use clap::ValueEnum;
+use devo_core::tools::ToolPlanConfig;
+use devo_core::tools::handlers;
 use devo_core::{
     AppConfigLoader, FileSystemAppConfigLoader, FileSystemSkillCatalog, ModelCatalog,
     PresetModelCatalog, SkillsConfig,
 };
-use devo_tools::ToolPlanConfig;
-use devo_tools::handlers;
+use devo_provider::SingleProviderRouter;
 use devo_utils::FileSystemConfigPathResolver;
 
 use crate::{
@@ -117,10 +118,12 @@ pub async fn run_server_process(args: ServerProcessArgs) -> Result<()> {
     let db = Arc::new(Database::open(db_path)?);
 
     let registry = Arc::new(registry);
+    let provider_router = Arc::new(SingleProviderRouter::new(provider.provider.clone()));
     let runtime = ServerRuntime::new(
         resolver.user_config_dir(),
         ServerRuntimeDependencies::new(
             provider.provider,
+            provider_router,
             Arc::clone(&registry),
             provider.default_model,
             model_catalog,
