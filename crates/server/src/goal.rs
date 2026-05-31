@@ -30,6 +30,12 @@ pub struct Goal {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GoalId(pub String);
 
+impl Default for GoalId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GoalId {
     pub fn new() -> Self {
         Self(format!("goal-{}", devo_protocol::SessionId::new()))
@@ -63,27 +69,20 @@ pub enum GoalStatus {
 
 impl GoalStatus {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Canceled | Self::Cleared)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Canceled | Self::Cleared
+        )
     }
 }
 
 // ── Budget ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct GoalBudget {
     pub max_turns: Option<u32>,
     pub max_tokens: Option<i64>,
     pub max_duration_seconds: Option<u64>,
-}
-
-impl Default for GoalBudget {
-    fn default() -> Self {
-        Self {
-            max_turns: None,
-            max_tokens: None,
-            max_duration_seconds: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -152,22 +151,22 @@ impl Goal {
             };
         }
 
-        if let Some(max_turns) = self.budget.max_turns {
-            if self.usage.turns_used >= max_turns {
-                return GoalContinuationDecision {
-                    should_continue: false,
-                    reason: Some("max turns reached".into()),
-                };
-            }
+        if let Some(max_turns) = self.budget.max_turns
+            && self.usage.turns_used >= max_turns
+        {
+            return GoalContinuationDecision {
+                should_continue: false,
+                reason: Some("max turns reached".into()),
+            };
         }
 
-        if let Some(max_tokens) = self.budget.max_tokens {
-            if self.usage.tokens_used >= max_tokens {
-                return GoalContinuationDecision {
-                    should_continue: false,
-                    reason: Some("max tokens reached".into()),
-                };
-            }
+        if let Some(max_tokens) = self.budget.max_tokens
+            && self.usage.tokens_used >= max_tokens
+        {
+            return GoalContinuationDecision {
+                should_continue: false,
+                reason: Some("max tokens reached".into()),
+            };
         }
 
         GoalContinuationDecision {

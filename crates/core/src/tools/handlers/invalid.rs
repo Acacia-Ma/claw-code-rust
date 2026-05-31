@@ -8,6 +8,12 @@ pub struct InvalidHandler {
     spec: ToolSpec,
 }
 
+impl Default for InvalidHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvalidHandler {
     pub fn new() -> Self {
         Self {

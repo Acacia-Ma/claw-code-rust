@@ -26,7 +26,12 @@ impl AgentRegistry {
         Self::default()
     }
 
-    pub fn register(&mut self, parent_id: SessionId, child_id: SessionId, metadata: SubagentMetadata) {
+    pub fn register(
+        &mut self,
+        parent_id: SessionId,
+        child_id: SessionId,
+        metadata: SubagentMetadata,
+    ) {
         self.agents.insert(child_id, metadata);
         self.parent_to_children
             .entry(parent_id)
@@ -37,10 +42,10 @@ impl AgentRegistry {
 
     pub fn unregister(&mut self, child_id: SessionId) {
         self.agents.remove(&child_id);
-        if let Some(parent_id) = self.child_to_parent.remove(&child_id) {
-            if let Some(children) = self.parent_to_children.get_mut(&parent_id) {
-                children.retain(|id| *id != child_id);
-            }
+        if let Some(parent_id) = self.child_to_parent.remove(&child_id)
+            && let Some(children) = self.parent_to_children.get_mut(&parent_id)
+        {
+            children.retain(|id| *id != child_id);
         }
     }
 
@@ -114,6 +119,12 @@ impl AgentPath {
 pub struct SubagentMailbox {
     pub tx: mpsc::UnboundedSender<SubagentMessage>,
     pub rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<SubagentMessage>>>,
+}
+
+impl Default for SubagentMailbox {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SubagentMailbox {
@@ -208,16 +219,20 @@ mod tests {
         let mut registry = AgentRegistry::new();
         let parent = SessionId::new();
         let child = SessionId::new();
-        registry.register(parent, child, SubagentMetadata {
-            session_id: child,
-            parent_session_id: parent,
-            agent_path: "root/test".into(),
-            nickname: "test".into(),
-            role: "tester".into(),
-            status: SubagentStatus::Completed,
-            spawned_at: Utc::now(),
-            closed_at: None,
-        });
+        registry.register(
+            parent,
+            child,
+            SubagentMetadata {
+                session_id: child,
+                parent_session_id: parent,
+                agent_path: "root/test".into(),
+                nickname: "test".into(),
+                role: "tester".into(),
+                status: SubagentStatus::Completed,
+                spawned_at: Utc::now(),
+                closed_at: None,
+            },
+        );
         registry.unregister(child);
         assert!(registry.get(child).is_none());
         assert!(registry.children_of(parent).is_empty());

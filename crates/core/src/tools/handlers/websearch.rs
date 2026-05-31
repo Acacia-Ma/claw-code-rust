@@ -11,6 +11,12 @@ pub struct WebSearchHandler {
     spec: ToolSpec,
 }
 
+impl Default for WebSearchHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSearchHandler {
     pub fn new() -> Self {
         Self {

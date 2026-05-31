@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use devo_protocol::{ItemId, SessionId, TurnId, TurnKind, TurnStatus};
+use devo_protocol::{ItemId, SessionId, TurnId};
 
 // ── ContextAssembler ────────────────────────────────────────────────
 
@@ -54,6 +54,7 @@ impl ContextAssembler {
     /// 9-step assembly: base instructions → tool schemas → prior transcript →
     /// metadata instructions → project instructions → skills/memory →
     /// goal context → change signal → current user input.
+    #[allow(clippy::too_many_arguments)]
     pub fn assemble(
         &self,
         session_id: SessionId,
@@ -427,7 +428,7 @@ impl ContextNormalizer {
         let mut messages: Vec<ProviderMessage> = Vec::new();
         let mut truncations_applied: u32 = 0;
         let mut items_dropped: u32 = 0;
-        let mut turns_dropped: u32 = 0;
+        let turns_dropped: u32 = 0;
 
         // Build messages from context entries
         for entry in &context.entries {
@@ -476,7 +477,7 @@ impl ContextNormalizer {
         // Pass 3: Token budget
         let mut token_count = estimate_message_tokens(&messages);
         let budget = self.config.effective_context_window;
-        let reserved = self.config.reserved_recent_turns as usize;
+        let reserved = self.config.reserved_recent_turns;
 
         while token_count > budget && messages.len() > reserved + 1 {
             // Drop oldest non-system messages

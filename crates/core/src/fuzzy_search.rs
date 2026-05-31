@@ -38,6 +38,12 @@ pub trait SearchProvider: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SearchId(pub uuid::Uuid);
 
+impl Default for SearchId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SearchId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())

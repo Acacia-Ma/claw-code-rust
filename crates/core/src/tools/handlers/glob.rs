@@ -12,6 +12,12 @@ pub struct GlobHandler {
     spec: ToolSpec,
 }
 
+impl Default for GlobHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlobHandler {
     pub fn new() -> Self {
         Self {

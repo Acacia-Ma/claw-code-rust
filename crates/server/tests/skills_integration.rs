@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
+use devo_core::AppConfigStore;
+use devo_core::ProviderVendorCatalog;
 use futures::stream;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -26,7 +28,9 @@ use devo_core::tools::ToolResultContent;
 use devo_core::tools::json_schema::JsonSchema;
 use devo_core::tools::registry::ToolRegistryBuilder;
 use devo_core::tools::tool_handler::ToolHandler;
-use devo_core::tools::tool_spec::{ToolExecutionMode, ToolOutputMode, ToolSpec};
+use devo_core::tools::tool_spec::ToolExecutionMode;
+use devo_core::tools::tool_spec::ToolOutputMode;
+use devo_core::tools::tool_spec::ToolSpec;
 use devo_protocol::ModelRequest;
 use devo_protocol::ModelResponse;
 use devo_protocol::RequestContent;
@@ -152,7 +156,8 @@ fn build_runtime_with_registry(
             registry,
             "test-model".to_string(),
             Arc::new(PresetModelCatalog::default()),
-            workspace_root,
+            Arc::new(ProviderVendorCatalog::default()),
+            workspace_root.clone(),
             Box::new(FileSystemSkillCatalog::new(SkillsConfig {
                 enabled: true,
                 user_roots: vec![user_skill_root],
@@ -161,7 +166,10 @@ fn build_runtime_with_registry(
             })),
             devo_core::AgentsMdConfig::default(),
             db,
-            data_root.join("config.toml"),
+            Arc::new(std::sync::Mutex::new(
+                AppConfigStore::load(data_root.to_path_buf(), workspace_root.as_deref())
+                    .expect("load app config store"),
+            )),
         ),
     )
 }

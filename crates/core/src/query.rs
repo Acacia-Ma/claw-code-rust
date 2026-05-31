@@ -1025,9 +1025,6 @@ mod tests {
     use crate::tools::ToolPreparationFeedback;
     use crate::tools::ToolRegistry;
     use crate::tools::ToolRuntime;
-    use crate::tools::errors::ToolExecutionError;
-    use crate::tools::handler_kind::ToolHandlerKind;
-    use crate::tools::invocation::{FunctionToolOutput, ToolInvocation, ToolOutput};
     use crate::tools::json_schema::JsonSchema;
     use crate::tools::registry::ToolRegistryBuilder;
     use crate::tools::router::PermissionChecker;

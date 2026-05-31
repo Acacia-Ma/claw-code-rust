@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 use crate::{
-    McpError, McpManager, McpServerId, McpServerRecord, McpServerStatus, McpStartupState,
-    McpAuthState,
+    McpAuthState, McpError, McpManager, McpServerId, McpServerRecord, McpServerStatus,
+    McpStartupState,
 };
 
 /// Basic in-memory MCP server manager with status tracking.
@@ -29,7 +29,11 @@ impl InMemoryMcpManager {
 
     pub async fn register_server(&self, record: McpServerRecord) {
         let id = record.id;
-        let state = if record.enabled { McpStartupState::NotStarted } else { McpStartupState::Disabled };
+        let state = if record.enabled {
+            McpStartupState::NotStarted
+        } else {
+            McpStartupState::Disabled
+        };
         let status = McpServerStatus {
             server_id: id,
             startup_state: state,
@@ -75,11 +79,11 @@ impl McpManager for InMemoryMcpManager {
         _input: serde_json::Value,
     ) -> Result<serde_json::Value, McpError> {
         let servers = self.servers.read().await;
-        let status = servers.get(server_id).ok_or_else(|| {
-            McpError::McpServerUnavailable {
+        let status = servers
+            .get(server_id)
+            .ok_or_else(|| McpError::McpServerUnavailable {
                 server_id: server_id.clone(),
-            }
-        })?;
+            })?;
         if status.startup_state != McpStartupState::Ready {
             return Err(McpError::McpServerUnavailable {
                 server_id: server_id.clone(),
@@ -98,11 +102,11 @@ impl McpManager for InMemoryMcpManager {
         uri: &str,
     ) -> Result<serde_json::Value, McpError> {
         let servers = self.servers.read().await;
-        let status = servers.get(server_id).ok_or_else(|| {
-            McpError::McpServerUnavailable {
+        let status = servers
+            .get(server_id)
+            .ok_or_else(|| McpError::McpServerUnavailable {
                 server_id: server_id.clone(),
-            }
-        })?;
+            })?;
         if status.startup_state != McpStartupState::Ready {
             return Err(McpError::McpServerUnavailable {
                 server_id: server_id.clone(),
@@ -121,7 +125,7 @@ impl McpManager for InMemoryMcpManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{McpServerId, McpTransportConfig, McpStartupPolicy};
+    use crate::{McpServerId, McpStartupPolicy, McpTransportConfig};
 
     fn make_record(id: McpServerId) -> McpServerRecord {
         McpServerRecord {
@@ -168,7 +172,9 @@ mod tests {
         let id = McpServerId("test-server".into());
         manager.register_server(make_record(id.clone())).await;
         // Server not started yet — should error
-        let result = manager.invoke_tool(&id, "test", serde_json::json!({})).await;
+        let result = manager
+            .invoke_tool(&id, "test", serde_json::json!({}))
+            .await;
         assert!(result.is_err());
     }
 

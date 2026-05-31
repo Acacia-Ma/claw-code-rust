@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use crate::package::{
-    FrontmatterFormat, SkillDefinition, SkillDiagnostic, SkillName, SkillPackage,
-    SkillPackageId, SkillSourceKind,
+    FrontmatterFormat, SkillDefinition, SkillDiagnostic, SkillName, SkillPackage, SkillPackageId,
+    SkillSourceKind,
 };
 
 /// Parse a SKILL.md file at the given path into a SkillDefinition.
@@ -61,42 +61,39 @@ pub fn parse_skill_md(path: &Path) -> Result<SkillPackage, Vec<SkillDiagnostic>>
     }
 
     // Parse frontmatter
-    let (mut name, mut description) = (None, None);
-    let mut version = None;
-    let mut tags = Vec::new();
-    let mut allowed_tools = Vec::new();
+    let name: Option<String>;
+    let description: Option<String>;
+    let version: Option<String>;
+    let tags: Vec<String>;
+    let allowed_tools: Vec<String>;
 
     match frontmatter_format {
-        FrontmatterFormat::Yaml => {
-            match parse_yaml_frontmatter(frontmatter_raw) {
-                Ok(fields) => {
-                    name = fields.name;
-                    description = fields.description;
-                    version = fields.version;
-                    tags = fields.tags;
-                    allowed_tools = fields.allowed_tools;
-                }
-                Err(reason) => {
-                    diagnostics.push(SkillDiagnostic::InvalidFrontmatter { reason });
-                    return Err(diagnostics);
-                }
+        FrontmatterFormat::Yaml => match parse_yaml_frontmatter(frontmatter_raw) {
+            Ok(fields) => {
+                name = fields.name;
+                description = fields.description;
+                version = fields.version;
+                tags = fields.tags;
+                allowed_tools = fields.allowed_tools;
             }
-        }
-        FrontmatterFormat::Toml => {
-            match parse_toml_frontmatter(frontmatter_raw) {
-                Ok(fields) => {
-                    name = fields.name;
-                    description = fields.description;
-                    version = fields.version;
-                    tags = fields.tags;
-                    allowed_tools = fields.allowed_tools;
-                }
-                Err(reason) => {
-                    diagnostics.push(SkillDiagnostic::InvalidFrontmatter { reason });
-                    return Err(diagnostics);
-                }
+            Err(reason) => {
+                diagnostics.push(SkillDiagnostic::InvalidFrontmatter { reason });
+                return Err(diagnostics);
             }
-        }
+        },
+        FrontmatterFormat::Toml => match parse_toml_frontmatter(frontmatter_raw) {
+            Ok(fields) => {
+                name = fields.name;
+                description = fields.description;
+                version = fields.version;
+                tags = fields.tags;
+                allowed_tools = fields.allowed_tools;
+            }
+            Err(reason) => {
+                diagnostics.push(SkillDiagnostic::InvalidFrontmatter { reason });
+                return Err(diagnostics);
+            }
+        },
         FrontmatterFormat::Unknown => {
             diagnostics.push(SkillDiagnostic::InvalidFrontmatter {
                 reason: "could not identify frontmatter format".into(),
@@ -135,9 +132,7 @@ pub fn parse_skill_md(path: &Path) -> Result<SkillPackage, Vec<SkillDiagnostic>>
     let skill_name = match SkillName::new(&name_str) {
         Ok(n) => n,
         Err(_) => {
-            diagnostics.push(SkillDiagnostic::InvalidName {
-                value: name_str,
-            });
+            diagnostics.push(SkillDiagnostic::InvalidName { value: name_str });
             return Err(diagnostics);
         }
     };
@@ -362,8 +357,16 @@ mod tests {
         assert_eq!(result.definition.version.as_deref(), Some("1.0"));
         assert_eq!(result.definition.tags, vec!["test", "example"]);
         assert_eq!(result.definition.allowed_tools, vec!["read", "write"]);
-        assert!(result.definition.instruction_body.contains("instruction body"));
-        assert_eq!(result.definition.frontmatter_format, FrontmatterFormat::Yaml);
+        assert!(
+            result
+                .definition
+                .instruction_body
+                .contains("instruction body")
+        );
+        assert_eq!(
+            result.definition.frontmatter_format,
+            FrontmatterFormat::Yaml
+        );
     }
 
     #[test]
@@ -382,7 +385,9 @@ mod tests {
         let result = parse_skill_md(&skill_md);
         assert!(result.is_err());
         let diags = result.unwrap_err();
-        assert!(diags.iter().any(|d| matches!(d, SkillDiagnostic::MissingRequiredField { field } if field == "name")));
+        assert!(diags.iter().any(
+            |d| matches!(d, SkillDiagnostic::MissingRequiredField { field } if field == "name")
+        ));
     }
 
     #[test]
@@ -414,7 +419,11 @@ mod tests {
         let result = parse_skill_md(&skill_md);
         assert!(result.is_err());
         let diags = result.unwrap_err();
-        assert!(diags.iter().any(|d| matches!(d, SkillDiagnostic::InvalidName { .. })));
+        assert!(
+            diags
+                .iter()
+                .any(|d| matches!(d, SkillDiagnostic::InvalidName { .. }))
+        );
     }
 
     #[test]
@@ -450,6 +459,9 @@ mod tests {
 
         let result = parse_skill_md(&skill_md).expect("parse");
         assert_eq!(result.definition.name.as_str(), "toml-skill");
-        assert_eq!(result.definition.frontmatter_format, FrontmatterFormat::Toml);
+        assert_eq!(
+            result.definition.frontmatter_format,
+            FrontmatterFormat::Toml
+        );
     }
 }

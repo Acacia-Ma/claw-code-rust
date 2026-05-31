@@ -538,8 +538,9 @@ pub async fn admit_turn(
 ///
 /// Core assembles context, resolves the model profile, collects tool definitions,
 /// and produces a plan that server uses to invoke the provider.
+#[allow(clippy::too_many_arguments)]
 pub async fn prepare_model_invocation(
-    store: &dyn SessionStore,
+    _store: &dyn SessionStore,
     session: &SessionProjection,
     turn: &TurnProjection,
     registry: &dyn ToolRegistry,
@@ -890,7 +891,7 @@ pub async fn consume_provider_event(
             usage_delta = Some(usage.clone());
             client_events.push(TurnClientEvent::TurnUsageUpdated {
                 turn_id: state.turn_id,
-                usage: usage,
+                usage,
             });
         }
 

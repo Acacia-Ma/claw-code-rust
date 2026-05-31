@@ -12,6 +12,7 @@ use ratatui::style::Color;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
@@ -866,15 +867,28 @@ impl ModelPickerView {
     fn render_lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         for (index, entry) in self.entries.iter().enumerate() {
-            let mut title = if index == self.selection {
-                Line::from(format!("  {}", entry.display_name))
-                    .style(Style::default().fg(self.accent_color).bold())
+            let is_selected = index == self.selection;
+            let marker = if entry.is_current {
+                "●"
+            } else if is_selected {
+                "›"
             } else {
-                Line::from(format!("  {}", entry.display_name)).dim()
+                " "
             };
-            if entry.is_current {
-                title.spans.push("  ".into());
-                title.spans.push("current".dark_gray());
+            let marker_style = if entry.is_current {
+                Style::default().fg(self.accent_color).bold()
+            } else {
+                Style::default()
+            };
+            let mut title = Line::from(vec![
+                Span::styled(marker.to_string(), marker_style),
+                Span::raw(" "),
+                Span::raw(entry.display_name.clone()),
+            ]);
+            if is_selected {
+                title = title.style(Style::default().fg(self.accent_color).bold());
+            } else if !entry.is_current {
+                title = title.dim();
             }
             lines.push(title);
             if let Some(description) = entry.description.as_deref()

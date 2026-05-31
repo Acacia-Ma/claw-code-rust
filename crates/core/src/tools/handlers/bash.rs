@@ -15,6 +15,12 @@ pub struct BashHandler {
     spec: ToolSpec,
 }
 
+impl Default for BashHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BashHandler {
     pub fn new() -> Self {
         Self {

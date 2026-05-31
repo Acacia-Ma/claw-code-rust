@@ -20,6 +20,12 @@ use devo_protocol::ModelSavedParams;
 use devo_protocol::ModelSavedResult;
 use devo_protocol::NotificationEnvelope;
 use devo_protocol::ProtocolErrorCode;
+use devo_protocol::ProviderValidateParams;
+use devo_protocol::ProviderValidateResult;
+use devo_protocol::ProviderVendorListParams;
+use devo_protocol::ProviderVendorListResult;
+use devo_protocol::ProviderVendorUpsertParams;
+use devo_protocol::ProviderVendorUpsertResult;
 use devo_protocol::ServerEvent;
 use devo_protocol::SessionCompactParams;
 use devo_protocol::SessionCompactResult;
@@ -232,6 +238,27 @@ impl StdioServerClient {
 
     pub async fn model_saved(&mut self, params: ModelSavedParams) -> Result<ModelSavedResult> {
         self.request("model/saved", params).await
+    }
+
+    pub async fn provider_vendor_list(
+        &mut self,
+        params: ProviderVendorListParams,
+    ) -> Result<ProviderVendorListResult> {
+        self.request("provider/list", params).await
+    }
+
+    pub async fn provider_vendor_upsert(
+        &mut self,
+        params: ProviderVendorUpsertParams,
+    ) -> Result<ProviderVendorUpsertResult> {
+        self.request("provider/upsert", params).await
+    }
+
+    pub async fn provider_validate(
+        &mut self,
+        params: ProviderValidateParams,
+    ) -> Result<ProviderValidateResult> {
+        self.request("provider/validate", params).await
     }
 
     pub async fn turn_start(&mut self, params: TurnStartParams) -> Result<TurnStartResult> {

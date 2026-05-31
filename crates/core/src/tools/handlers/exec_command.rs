@@ -23,7 +23,9 @@ use crate::unified_exec::process::UnifiedExecProcess;
 use crate::unified_exec::process::collect_output;
 use crate::unified_exec::store::ProcessStore;
 
+#[allow(dead_code)]
 const MAX_EXEC_OUTPUT_DELTAS_PER_CALL: usize = 10_000;
+#[allow(dead_code)]
 const UNIFIED_EXEC_OUTPUT_DELTA_MAX_BYTES: usize = 8_192;
 
 pub struct ExecCommandHandler {
@@ -399,6 +401,7 @@ fn format_apply_patch_intercept_response(content: &str) -> String {
     format!("Wall time: 0.0000 seconds\nOutput:\n{content}")
 }
 
+#[allow(dead_code)]
 fn progress_delta_chunks(bytes: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(bytes);
     let mut chunks = Vec::new();
@@ -422,6 +425,7 @@ fn progress_delta_chunks(bytes: &[u8]) -> Vec<String> {
     chunks
 }
 
+#[allow(dead_code)]
 fn floor_char_boundary(value: &str, mut index: usize) -> usize {
     index = index.min(value.len());
     while index > 0 && !value.is_char_boundary(index) {

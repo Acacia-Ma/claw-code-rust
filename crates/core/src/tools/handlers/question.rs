@@ -11,6 +11,12 @@ pub struct QuestionHandler {
     spec: ToolSpec,
 }
 
+impl Default for QuestionHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QuestionHandler {
     pub fn new() -> Self {
         Self {

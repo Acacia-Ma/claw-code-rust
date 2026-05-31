@@ -14,6 +14,12 @@ pub struct ReadHandler {
     spec: ToolSpec,
 }
 
+impl Default for ReadHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReadHandler {
     pub fn new() -> Self {
         Self {

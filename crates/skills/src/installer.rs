@@ -121,8 +121,7 @@ impl ManagedMetadata {
         let path = Self::metadata_path(package_dir);
         let toml_str = toml::to_string_pretty(self)
             .map_err(|e| format!("failed to serialize metadata: {}", e))?;
-        std::fs::write(&path, toml_str)
-            .map_err(|e| format!("failed to write metadata: {}", e))?;
+        std::fs::write(&path, toml_str).map_err(|e| format!("failed to write metadata: {}", e))?;
         Ok(())
     }
 
@@ -133,8 +132,8 @@ impl ManagedMetadata {
         }
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("failed to read metadata: {}", e))?;
-        let meta: Self = toml::from_str(&content)
-            .map_err(|e| format!("failed to parse metadata: {}", e))?;
+        let meta: Self =
+            toml::from_str(&content).map_err(|e| format!("failed to parse metadata: {}", e))?;
         Ok(Some(meta))
     }
 }
@@ -182,17 +181,15 @@ impl DefaultSkillInstaller {
         }
 
         for asset in &self.bundle.skills {
-            let package_dir = options
-                .user_skill_root
-                .join(asset.package_name.as_str());
+            let package_dir = options.user_skill_root.join(asset.package_name.as_str());
 
             match self.install_one(asset, &package_dir, options.mode) {
                 Ok(action) => match action {
                     InstallAction::Installed => report.installed.push(asset.package_name.clone()),
                     InstallAction::Updated => report.updated.push(asset.package_name.clone()),
-                    InstallAction::SkippedUserModified => {
-                        report.skipped_user_modified.push(asset.package_name.clone())
-                    }
+                    InstallAction::SkippedUserModified => report
+                        .skipped_user_modified
+                        .push(asset.package_name.clone()),
                     InstallAction::SkippedConflict => {
                         report.skipped_conflict.push(asset.package_name.clone())
                     }
@@ -275,11 +272,7 @@ impl DefaultSkillInstaller {
         }
     }
 
-    fn write_package(
-        &self,
-        asset: &DefaultSkillAsset,
-        package_dir: &Path,
-    ) -> Result<(), String> {
+    fn write_package(&self, asset: &DefaultSkillAsset, package_dir: &Path) -> Result<(), String> {
         std::fs::create_dir_all(package_dir)
             .map_err(|e| format!("failed to create package dir: {}", e))?;
 
@@ -300,8 +293,7 @@ impl DefaultSkillInstaller {
                     .map_err(|e| format!("metadata: {}", e))?
                     .permissions();
                 perms.set_mode(0o755);
-                std::fs::set_permissions(&file_path, perms)
-                    .map_err(|e| format!("chmod: {}", e))?;
+                std::fs::set_permissions(&file_path, perms).map_err(|e| format!("chmod: {}", e))?;
             }
         }
 
@@ -357,7 +349,12 @@ mod tests {
         assert_eq!(report.installed.len(), 1);
         assert!(report.failed.is_empty());
         assert!(root.join("code-review").join("SKILL.md").exists());
-        assert!(root.join("code-review").join(".devo").join("default-skill.toml").exists());
+        assert!(
+            root.join("code-review")
+                .join(".devo")
+                .join("default-skill.toml")
+                .exists()
+        );
     }
 
     #[test]
@@ -435,7 +432,8 @@ mod tests {
         // Re-install with updated content and new hash
         let mut bundle2 = make_bundle();
         bundle2.skills[0].content_hash = Sha256Digest("newhash".into());
-        bundle2.skills[0].files[0].content = "---\nname: code-review\ndescription: Updated\n---\n\nUpdated body.".into();
+        bundle2.skills[0].files[0].content =
+            "---\nname: code-review\ndescription: Updated\n---\n\nUpdated body.".into();
 
         // Manually update metadata to match the old hash
         let meta = ManagedMetadata {

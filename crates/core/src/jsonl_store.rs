@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
 
 use devo_protocol::SessionId;
 
@@ -41,10 +40,10 @@ impl JsonlSessionStore {
         sessions_dir.join(format!("{}.jsonl", session_id))
     }
 
-    fn lock_for(&self, path: &PathBuf) -> Arc<Mutex<()>> {
+    fn lock_for(&self, path: &Path) -> Arc<Mutex<()>> {
         let mut locks = self.file_locks.lock().unwrap();
         locks
-            .entry(path.clone())
+            .entry(path.to_path_buf())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
@@ -317,7 +316,7 @@ mod tests {
             .unwrap();
 
         // Replay from after the first record
-        let size_after_first = store.file_size(session_id).await.unwrap();
+        let _size_after_first = store.file_size(session_id).await.unwrap();
         let first_record_len = offset1 - offset0;
 
         let mut replay = store
@@ -426,13 +425,15 @@ mod tests {
         // Append garbage bytes to simulate truncation
         let path = store.session_path(session_id);
         let lock = store.lock_for(&path);
-        let _guard = lock.lock().unwrap();
-        std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap()
-            .write_all(b"garbage without newline")
-            .unwrap();
+        {
+            let _guard = lock.lock().unwrap();
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(b"garbage without newline")
+                .unwrap();
+        } // drop guard before await
 
         // Replay should get the valid record and ignore the garbage line
         let mut replay = store.replay(session_id, 0).await.unwrap();

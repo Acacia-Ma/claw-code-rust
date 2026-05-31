@@ -109,7 +109,7 @@ impl ToolRegistry {
 
     pub fn load_deferred_tools(
         &self,
-        session_id: &str,
+        _session_id: &str,
         config: &DeferredLoadingConfig,
         query: &str,
     ) -> Result<String, String> {

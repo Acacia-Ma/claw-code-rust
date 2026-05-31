@@ -80,7 +80,7 @@ impl ServerRuntime {
             let mut session = session_arc.lock().await;
             if let Some(active_turn) = session.active_turn.as_ref() {
                 let pending_turn_queue = Arc::clone(&session.pending_turn_queue);
-                let active_turn_id = active_turn.turn_id;
+                let _active_turn_id = active_turn.turn_id;
                 let is_ephemeral = session.summary.ephemeral;
                 drop(session);
 

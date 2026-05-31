@@ -98,10 +98,22 @@ impl ProviderError {
             self,
             Self::RateLimitError { .. }
                 | Self::ProviderTimeoutError { .. }
-                | Self::ProviderServerError { status_code: Some(429), .. }
-                | Self::ProviderServerError { status_code: Some(502), .. }
-                | Self::ProviderServerError { status_code: Some(503), .. }
-                | Self::ProviderServerError { status_code: Some(504), .. }
+                | Self::ProviderServerError {
+                    status_code: Some(429),
+                    ..
+                }
+                | Self::ProviderServerError {
+                    status_code: Some(502),
+                    ..
+                }
+                | Self::ProviderServerError {
+                    status_code: Some(503),
+                    ..
+                }
+                | Self::ProviderServerError {
+                    status_code: Some(504),
+                    ..
+                }
         )
     }
 
@@ -109,7 +121,8 @@ impl ProviderError {
     pub fn retry_after_seconds(&self) -> Option<u64> {
         match self {
             Self::RateLimitError {
-                retry_after_seconds, ..
+                retry_after_seconds,
+                ..
             } => *retry_after_seconds,
             _ => None,
         }
@@ -203,20 +216,61 @@ mod tests {
     fn all_variants_have_distinct_codes() {
         let mut codes = std::collections::HashSet::new();
         let errors = vec![
-            ProviderError::AuthenticationError { message: "".into(), provider_name: None, status_code: None },
-            ProviderError::RateLimitError { message: "".into(), retry_after_seconds: None, provider_name: None },
-            ProviderError::ProviderServerError { message: "".into(), status_code: None, provider_name: None },
-            ProviderError::ProviderTimeoutError { message: "".into(), provider_name: None },
-            ProviderError::ContextLimitError { message: "".into(), current_tokens: None, limit: None },
-            ProviderError::ModelNotFoundError { message: "".into(), model_name: None },
-            ProviderError::QuotaExceededError { message: "".into(), provider_name: None },
-            ProviderError::ContentFilteredError { message: "".into(), finish_reason: None },
-            ProviderError::InvalidRequestError { message: "".into(), details: None },
-            ProviderError::StreamError { message: "".into(), bytes_received: None },
-            ProviderError::UnknownError { message: "".into(), status_code: None },
+            ProviderError::AuthenticationError {
+                message: "".into(),
+                provider_name: None,
+                status_code: None,
+            },
+            ProviderError::RateLimitError {
+                message: "".into(),
+                retry_after_seconds: None,
+                provider_name: None,
+            },
+            ProviderError::ProviderServerError {
+                message: "".into(),
+                status_code: None,
+                provider_name: None,
+            },
+            ProviderError::ProviderTimeoutError {
+                message: "".into(),
+                provider_name: None,
+            },
+            ProviderError::ContextLimitError {
+                message: "".into(),
+                current_tokens: None,
+                limit: None,
+            },
+            ProviderError::ModelNotFoundError {
+                message: "".into(),
+                model_name: None,
+            },
+            ProviderError::QuotaExceededError {
+                message: "".into(),
+                provider_name: None,
+            },
+            ProviderError::ContentFilteredError {
+                message: "".into(),
+                finish_reason: None,
+            },
+            ProviderError::InvalidRequestError {
+                message: "".into(),
+                details: None,
+            },
+            ProviderError::StreamError {
+                message: "".into(),
+                bytes_received: None,
+            },
+            ProviderError::UnknownError {
+                message: "".into(),
+                status_code: None,
+            },
         ];
         for err in &errors {
-            assert!(codes.insert(err.error_code()), "duplicate code: {}", err.error_code());
+            assert!(
+                codes.insert(err.error_code()),
+                "duplicate code: {}",
+                err.error_code()
+            );
         }
     }
 

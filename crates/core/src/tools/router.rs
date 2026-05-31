@@ -21,6 +21,7 @@ type CompletionCallback = dyn Fn(&ToolCallResult) + Send + Sync;
 type CompletionCallbackArc = Arc<CompletionCallback>;
 type PermissionFuture = futures::future::BoxFuture<'static, Result<(), String>>;
 type PermissionCheckFn = dyn Fn(ToolPermissionRequest) -> PermissionFuture + Send + Sync;
+#[allow(dead_code)]
 const PROGRESS_DRAIN_GRACE_MS: u64 = 50;
 
 #[derive(Debug, Clone)]

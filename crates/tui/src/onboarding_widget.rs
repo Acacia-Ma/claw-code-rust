@@ -29,6 +29,7 @@ use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
 
 use devo_protocol::Model;
+use devo_protocol::ProviderVendor;
 use devo_protocol::ProviderWireApi;
 
 use crate::app_command::AppCommand;
@@ -40,7 +41,6 @@ use crate::exec_cell::spinner;
 use crate::render::renderable::Renderable;
 use crate::tui::frame_requester::FrameRequester;
 
-const CUSTOM_MODEL_SENTINEL: &str = "__custom_model__";
 const SPINNER_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
 
 /// Simple content area with padding, no background styling.
@@ -60,10 +60,8 @@ fn onboarding_content_area(area: Rect) -> Rect {
 pub(crate) enum OnboardingResult {
     /// Validation succeeded, config should be saved.
     ValidationSucceeded {
-        model: String,
-        provider: ProviderWireApi,
-        base_url: Option<String>,
-        api_key: Option<String>,
+        model_slug: String,
+        model_name: String,
     },
     /// User cancelled onboarding.
     Cancelled,
@@ -97,8 +95,7 @@ enum OnboardingState {
         items: Vec<ProviderSelectionItem>,
         selected_idx: usize,
     },
-    /// Steps 3-7: Inline setup with vertical rail.
-    /// TODO: Should be cleaned, not sure what is the purpose InlineSetup.
+    /// Steps 3-8: Inline setup for provider vendor and model binding fields.
     InlineSetup {
         model: String,
         provider: ProviderWireApi,
@@ -111,8 +108,7 @@ enum OnboardingState {
         input: String,
         cursor_pos: usize,
     },
-    /// TODO: Move Invocation Method into provider item.
-    /// Step 9: Select invocation method.
+    /// Step 9: Select provider wire API type.
     InvocationMethod {
         model: String,
         provider: ProviderWireApi,
@@ -139,8 +135,13 @@ enum OnboardingState {
     },
     /// Validating connection.
     Validating {
-        model: String,
-        provider: ProviderWireApi,
+        model_slug: String,
+        model_name: String,
+        display_name: String,
+        provider_id: String,
+        provider_name: String,
+        invocation_method: ProviderWireApi,
+        default_reasoning_effort: Option<String>,
         base_url: Option<String>,
         api_key: Option<String>,
         started_at: Instant,
@@ -149,6 +150,7 @@ enum OnboardingState {
     ValidationFailed {
         model: String,
         provider: ProviderWireApi,
+        provider_name: String,
         base_url: Option<String>,
         api_key: Option<String>,
         error_message: String,
@@ -167,13 +169,15 @@ struct ModelSelectionItem {
 struct ProviderSelectionItem {
     label: String,
     description: String,
-    /// None means "Add provider..." (create new).
-    /// TODO: Wrong Implemention here, should be endpoint (base url + api key) and wire api here.
-    /// TODO: Merge Invocation Method Item here
-    provider: Option<ProviderWireApi>,
+    kind: ProviderSelectionKind,
 }
 
-/// TODO: Remove the InvocationMethodItem, add it into ProviderSelectionItem
+#[derive(Debug, Clone)]
+enum ProviderSelectionKind {
+    Vendor(ProviderVendor),
+    AddProvider,
+}
+
 #[derive(Debug)]
 struct InvocationMethodItem {
     label: String,
@@ -193,6 +197,7 @@ pub(crate) struct OnboardingWidget {
     result: Option<OnboardingResult>,
     /// Models from the catalog, stored so `go_back_to_model_selection` can restore them.
     original_models: Vec<Model>,
+    provider_vendors: Vec<ProviderVendor>,
     app_event_tx: AppEventSender,
     frame_requester: FrameRequester,
     animations_enabled: bool,
@@ -210,7 +215,7 @@ impl OnboardingWidget {
         let mut state = ScrollState::new();
         state.selected_idx = Some(0);
 
-        Self {
+        let this = Self {
             state: OnboardingState::ModelSelection {
                 items,
                 state,
@@ -220,29 +225,28 @@ impl OnboardingWidget {
             complete: false,
             result: None,
             original_models: models.to_vec(),
+            provider_vendors: Vec::new(),
             app_event_tx,
             frame_requester,
             animations_enabled,
-        }
+        };
+        this.app_event_tx
+            .send(AppEvent::Command(AppCommand::RunUserShellCommand {
+                command: "provider list".to_string(),
+            }));
+        this
     }
 
-    /// Build `ModelSelectionItem` list from the catalog models, with a trailing
-    /// "Custom Model" sentinel entry.
+    /// Build `ModelSelectionItem` list from the catalog models.
     fn build_model_items(models: &[Model]) -> Vec<ModelSelectionItem> {
-        let mut items: Vec<ModelSelectionItem> = models
+        models
             .iter()
             .map(|m| ModelSelectionItem {
                 slug: m.slug.clone(),
                 display_name: m.display_name.clone(),
                 is_custom: false,
             })
-            .collect();
-        items.push(ModelSelectionItem {
-            slug: CUSTOM_MODEL_SENTINEL.to_string(),
-            display_name: "Custom Model".to_string(),
-            is_custom: true,
-        });
-        items
+            .collect()
     }
 
     pub(crate) fn take_result(&mut self) -> Option<OnboardingResult> {
@@ -258,21 +262,25 @@ impl OnboardingWidget {
         self.result = Some(OnboardingResult::Cancelled);
     }
 
+    pub(crate) fn on_provider_vendors_listed(&mut self, provider_vendors: Vec<ProviderVendor>) {
+        self.provider_vendors = provider_vendors;
+        if let OnboardingState::ProviderSelection { items, .. } = &mut self.state {
+            *items = Self::provider_selection_items(&self.provider_vendors);
+        }
+        self.frame_requester.schedule_frame();
+    }
+
     /// Called when validation succeeds.
     pub(crate) fn on_validation_succeeded(&mut self, _reply_preview: String) {
         if let OnboardingState::Validating {
-            model,
-            provider,
-            base_url,
-            api_key,
+            model_slug,
+            model_name,
             ..
         } = &self.state
         {
             self.result = Some(OnboardingResult::ValidationSucceeded {
-                model: model.clone(),
-                provider: *provider,
-                base_url: base_url.clone(),
-                api_key: api_key.clone(),
+                model_slug: model_slug.clone(),
+                model_name: model_name.clone(),
             });
             self.complete = true;
         }
@@ -281,22 +289,59 @@ impl OnboardingWidget {
     /// Called when validation fails.
     pub(crate) fn on_validation_failed(&mut self, error_message: String) {
         if let OnboardingState::Validating {
-            model,
-            provider,
+            model_slug,
+            invocation_method,
+            provider_name,
             base_url,
             api_key,
             ..
         } = &self.state
         {
             self.state = OnboardingState::ValidationFailed {
-                model: model.clone(),
-                provider: *provider,
+                model: model_slug.clone(),
+                provider: *invocation_method,
+                provider_name: provider_name.clone(),
                 base_url: base_url.clone(),
                 api_key: api_key.clone(),
                 error_message,
                 selected_action: 0,
             };
         }
+    }
+
+    pub(crate) fn handle_paste(&mut self, text: String) {
+        match &mut self.state {
+            OnboardingState::ModelSelection {
+                items,
+                state,
+                search_query,
+                filtered_indices,
+            } => {
+                search_query.push_str(&text);
+                Self::model_apply_filter(items, search_query, filtered_indices, state);
+            }
+            OnboardingState::CustomModelName { input, cursor_pos }
+            | OnboardingState::InlineSetup {
+                input, cursor_pos, ..
+            } => {
+                Self::insert_at_cursor(input, cursor_pos, &text);
+            }
+            OnboardingState::ProviderSelection { .. }
+            | OnboardingState::InvocationMethod { .. }
+            | OnboardingState::ReasoningEffort { .. }
+            | OnboardingState::Validating { .. }
+            | OnboardingState::ValidationFailed { .. } => {}
+        }
+    }
+
+    fn insert_at_cursor(input: &mut String, cursor_pos: &mut usize, text: &str) {
+        let byte_pos = input
+            .char_indices()
+            .nth((*cursor_pos).min(input.chars().count()))
+            .map(|(idx, _)| idx)
+            .unwrap_or(input.len());
+        input.insert_str(byte_pos, text);
+        *cursor_pos += text.chars().count();
     }
 
     // ── Helpers ──
@@ -310,20 +355,30 @@ impl OnboardingWidget {
         }
     }
 
-    fn default_base_url(provider: ProviderWireApi) -> String {
-        match provider {
-            ProviderWireApi::AnthropicMessages => "https://api.anthropic.com".to_string(),
-            ProviderWireApi::OpenAIChatCompletions => "https://api.openai.com/v1".to_string(),
-            ProviderWireApi::OpenAIResponses => "https://api.openai.com/v1".to_string(),
-        }
-    }
-
     fn provider_display_name(provider: ProviderWireApi) -> &'static str {
         match provider {
             ProviderWireApi::AnthropicMessages => "Anthropic",
             ProviderWireApi::OpenAIChatCompletions => "OpenAI Chat Completions",
             ProviderWireApi::OpenAIResponses => "OpenAI Responses",
         }
+    }
+
+    fn catalog_display_name(&self, slug: &str) -> String {
+        self.original_models
+            .iter()
+            .find(|model| model.slug == slug)
+            .map(|model| model.display_name.clone())
+            .unwrap_or_else(|| slug.to_string())
+    }
+
+    fn model_supports_reasoning(&self, slug: &str) -> bool {
+        self.original_models.iter().any(|model| {
+            model.slug == slug
+                && !matches!(
+                    model.thinking_capability,
+                    devo_protocol::ThinkingCapability::Unsupported
+                )
+        })
     }
 
     fn go_back_to_model_selection(&mut self) {
@@ -338,25 +393,51 @@ impl OnboardingWidget {
             filtered_indices,
         };
     }
+}
 
-    fn start_validation(
-        &mut self,
-        model: String,
-        provider: ProviderWireApi,
-        base_url: Option<String>,
-        api_key: Option<String>,
-    ) {
+struct ValidationParams {
+    model_slug: String,
+    model_name: String,
+    display_name: String,
+    provider_id: String,
+    provider_name: String,
+    invocation_method: ProviderWireApi,
+    default_reasoning_effort: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+}
+
+impl OnboardingWidget {
+    fn start_validation(&mut self, params: ValidationParams) {
+        let display_name =
+            if params.display_name.trim().is_empty() || params.display_name == params.model_name {
+                self.catalog_display_name(&params.model_slug)
+            } else {
+                params.display_name.clone()
+            };
+
         self.state = OnboardingState::Validating {
-            model: model.clone(),
-            provider,
-            base_url: base_url.clone(),
-            api_key: api_key.clone(),
+            model_slug: params.model_slug.clone(),
+            model_name: params.model_name.clone(),
+            display_name: display_name.clone(),
+            provider_id: params.provider_id.clone(),
+            provider_name: params.provider_name.clone(),
+            invocation_method: params.invocation_method,
+            default_reasoning_effort: params.default_reasoning_effort.clone(),
+            base_url: params.base_url.clone(),
+            api_key: params.api_key.clone(),
             started_at: Instant::now(),
         };
         let payload = serde_json::json!({
-            "model": model,
-            "base_url": base_url,
-            "api_key": api_key,
+            "model_slug": params.model_slug,
+            "model_name": params.model_name,
+            "display_name": display_name,
+            "provider_id": params.provider_id,
+            "provider_name": params.provider_name,
+            "invocation_method": params.invocation_method,
+            "default_reasoning_effort": params.default_reasoning_effort,
+            "base_url": params.base_url,
+            "api_key": params.api_key,
         });
         self.app_event_tx
             .send(AppEvent::Command(AppCommand::RunUserShellCommand {
@@ -420,7 +501,7 @@ impl OnboardingWidget {
                         let slug = item.slug.clone();
                         self.state = OnboardingState::ProviderSelection {
                             model: slug,
-                            items: Self::provider_selection_items(),
+                            items: Self::provider_selection_items(&self.provider_vendors),
                             selected_idx: 0,
                         };
                     }
@@ -525,7 +606,7 @@ impl OnboardingWidget {
                 }
                 self.state = OnboardingState::ProviderSelection {
                     model,
-                    items: Self::provider_selection_items(),
+                    items: Self::provider_selection_items(&self.provider_vendors),
                     selected_idx: 0,
                 };
             }
@@ -536,29 +617,28 @@ impl OnboardingWidget {
         }
     }
 
-    fn provider_selection_items() -> Vec<ProviderSelectionItem> {
-        vec![
-            ProviderSelectionItem {
-                label: "OpenAI Chat Completions".to_string(),
-                description: "Most providers (OpenAI, Together, Groq, ...)".to_string(),
-                provider: Some(ProviderWireApi::OpenAIChatCompletions),
-            },
-            ProviderSelectionItem {
-                label: "OpenAI Responses".to_string(),
-                description: "OpenAI native Responses API".to_string(),
-                provider: Some(ProviderWireApi::OpenAIResponses),
-            },
-            ProviderSelectionItem {
-                label: "Anthropic Messages".to_string(),
-                description: "Claude models via Anthropic API".to_string(),
-                provider: Some(ProviderWireApi::AnthropicMessages),
-            },
-            ProviderSelectionItem {
-                label: "Add provider...".to_string(),
-                description: "Enter custom provider settings".to_string(),
-                provider: None,
-            },
-        ]
+    fn provider_selection_items(provider_vendors: &[ProviderVendor]) -> Vec<ProviderSelectionItem> {
+        let mut items = provider_vendors
+            .iter()
+            .cloned()
+            .map(|provider_vendor| {
+                let description = provider_vendor
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "Configured provider vendor".to_string());
+                ProviderSelectionItem {
+                    label: provider_vendor.name.clone(),
+                    description,
+                    kind: ProviderSelectionKind::Vendor(provider_vendor),
+                }
+            })
+            .collect::<Vec<_>>();
+        items.push(ProviderSelectionItem {
+            label: "Add provider...".to_string(),
+            description: "Enter custom provider settings".to_string(),
+            kind: ProviderSelectionKind::AddProvider,
+        });
+        items
     }
 
     fn provider_selection_handle_key(&mut self, key: KeyEvent) {
@@ -585,35 +665,40 @@ impl OnboardingWidget {
             KeyCode::Enter => {
                 if let Some(item) = items.get(*selected_idx) {
                     let model_slug = model.clone();
-                    if let Some(provider) = item.provider {
-                        // Existing provider selected — skip to model name entry.
-                        let default_url = Self::default_base_url(provider);
-                        self.state = OnboardingState::InlineSetup {
-                            model: model_slug.clone(),
-                            provider,
-                            provider_name: Self::provider_display_name(provider).to_string(),
-                            base_url: default_url,
-                            api_key: String::new(),
-                            model_name: model_slug.clone(),
-                            display_name: String::new(),
-                            active_field: InlineField::ModelName,
-                            input: model_slug.clone(),
-                            cursor_pos: model_slug.len(),
-                        };
-                    } else {
-                        // "Add provider..." — enter inline setup from provider name.
-                        self.state = OnboardingState::InlineSetup {
-                            model: model_slug.clone(),
-                            provider: ProviderWireApi::OpenAIChatCompletions,
-                            provider_name: String::new(),
-                            base_url: String::new(),
-                            api_key: String::new(),
-                            model_name: model_slug.clone(),
-                            display_name: String::new(),
-                            active_field: InlineField::ProviderName,
-                            input: String::new(),
-                            cursor_pos: 0,
-                        };
+                    match &item.kind {
+                        ProviderSelectionKind::Vendor(provider_vendor) => {
+                            let provider = provider_vendor
+                                .wire_apis
+                                .first()
+                                .copied()
+                                .unwrap_or_else(|| Self::infer_provider(&model_slug));
+                            self.state = OnboardingState::InlineSetup {
+                                model: model_slug.clone(),
+                                provider,
+                                provider_name: provider_vendor.name.clone(),
+                                base_url: provider_vendor.base_url.clone().unwrap_or_default(),
+                                api_key: String::new(),
+                                model_name: model_slug.clone(),
+                                display_name: String::new(),
+                                active_field: InlineField::ModelName,
+                                input: model_slug.clone(),
+                                cursor_pos: model_slug.len(),
+                            };
+                        }
+                        ProviderSelectionKind::AddProvider => {
+                            self.state = OnboardingState::InlineSetup {
+                                model: model_slug.clone(),
+                                provider: ProviderWireApi::OpenAIChatCompletions,
+                                provider_name: String::new(),
+                                base_url: String::new(),
+                                api_key: String::new(),
+                                model_name: model_slug.clone(),
+                                display_name: String::new(),
+                                active_field: InlineField::ProviderName,
+                                input: String::new(),
+                                cursor_pos: 0,
+                            };
+                        }
                     }
                 }
             }
@@ -683,8 +768,8 @@ impl OnboardingWidget {
                     InlineField::ProviderName => {
                         *provider_name = input.trim().to_string();
                         *active_field = InlineField::BaseUrl;
-                        *input = Self::default_base_url(*provider);
-                        *cursor_pos = input.len();
+                        input.clear();
+                        *cursor_pos = 0;
                     }
                     InlineField::BaseUrl => {
                         *base_url = input.trim().to_string();
@@ -738,7 +823,7 @@ impl OnboardingWidget {
                         let model = model.clone();
                         self.state = OnboardingState::ProviderSelection {
                             model,
-                            items: Self::provider_selection_items(),
+                            items: Self::provider_selection_items(&self.provider_vendors),
                             selected_idx: 0,
                         };
                     }
@@ -861,7 +946,17 @@ impl OnboardingWidget {
                         } else {
                             Some(api_key)
                         };
-                        self.start_validation(model, provider, base_url_opt, api_key_opt);
+                        self.start_validation(ValidationParams {
+                            model_slug: model,
+                            model_name,
+                            display_name,
+                            provider_id: provider_name.clone(),
+                            provider_name,
+                            invocation_method: invocation,
+                            default_reasoning_effort: None,
+                            base_url: base_url_opt,
+                            api_key: api_key_opt,
+                        });
                     }
                 }
             }
@@ -908,9 +1003,12 @@ impl OnboardingWidget {
     fn reasoning_effort_handle_key(&mut self, key: KeyEvent) {
         let OnboardingState::ReasoningEffort {
             model,
-            provider,
             base_url,
             api_key,
+            model_name,
+            display_name,
+            provider_name,
+            invocation_method,
             items,
             selected_idx,
             ..
@@ -932,7 +1030,12 @@ impl OnboardingWidget {
             }
             KeyCode::Enter => {
                 let model = model.clone();
-                let provider = *provider;
+                let invocation_method = *invocation_method;
+                let model_name = model_name.clone();
+                let display_name = display_name.clone();
+                let provider_name = provider_name.clone();
+                let default_reasoning_effort =
+                    items.get(*selected_idx).map(|item| item.label.clone());
                 let base_url = base_url.clone();
                 let api_key = api_key.clone();
                 let base_url_opt = if base_url.is_empty() {
@@ -945,7 +1048,17 @@ impl OnboardingWidget {
                 } else {
                     Some(api_key)
                 };
-                self.start_validation(model, provider, base_url_opt, api_key_opt);
+                self.start_validation(ValidationParams {
+                    model_slug: model,
+                    model_name,
+                    display_name,
+                    provider_id: provider_name.clone(),
+                    provider_name,
+                    invocation_method,
+                    default_reasoning_effort,
+                    base_url: base_url_opt,
+                    api_key: api_key_opt,
+                });
             }
             KeyCode::Esc => {
                 // Go back to invocation method selection.
@@ -993,6 +1106,7 @@ impl OnboardingWidget {
         let OnboardingState::ValidationFailed {
             model,
             provider,
+            provider_name,
             base_url,
             api_key,
             error_message: _,
@@ -1024,20 +1138,32 @@ impl OnboardingWidget {
                     // Retry.
                     let model = model.clone();
                     let provider = *provider;
+                    let provider_name = provider_name.clone();
                     let base_url = base_url.clone();
                     let api_key = api_key.clone();
-                    self.start_validation(model, provider, base_url, api_key);
+                    self.start_validation(ValidationParams {
+                        model_slug: model.clone(),
+                        model_name: model.clone(),
+                        display_name: model,
+                        provider_id: provider_name.clone(),
+                        provider_name,
+                        invocation_method: provider,
+                        default_reasoning_effort: None,
+                        base_url,
+                        api_key,
+                    });
                 }
                 1 => {
                     // Edit settings — go back to inline setup API key field.
                     let model_slug = model.clone();
                     let provider = *provider;
+                    let provider_name = provider_name.clone();
                     let base_url = base_url.clone().unwrap_or_default();
                     let api_key = api_key.clone().unwrap_or_default();
                     self.state = OnboardingState::InlineSetup {
                         model: model_slug.clone(),
                         provider,
-                        provider_name: Self::provider_display_name(provider).to_string(),
+                        provider_name,
                         base_url,
                         api_key: api_key.clone(),
                         model_name: model_slug,
@@ -1061,20 +1187,71 @@ impl OnboardingWidget {
     }
 
     // ── Rendering: Inline Setup with Vertical Rail ──
+}
 
-    fn render_inline_setup(
-        model: &str,
-        provider_name: &str,
-        base_url: &str,
-        api_key: &str,
-        model_name: &str,
-        display_name: &str,
-        active_field: &InlineField,
-        input: &str,
-        cursor_pos: usize,
-        area: Rect,
-        buf: &mut Buffer,
+struct InlineSetupRenderParams<'a> {
+    model: &'a str,
+    supports_reasoning: bool,
+    provider_name: &'a str,
+    base_url: &'a str,
+    api_key: &'a str,
+    model_name: &'a str,
+    display_name: &'a str,
+    active_field: &'a InlineField,
+    input: &'a str,
+    cursor_pos: usize,
+}
+
+impl OnboardingWidget {
+    fn render_footer(lines: &mut Vec<Line<'static>>, primary: &str, secondary: &str) {
+        lines.push(Line::from(""));
+        if secondary.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                primary.to_string(),
+                Style::default().dim(),
+            )]));
+            return;
+        }
+        lines.push(Line::from(vec![
+            Span::styled(primary.to_string(), Style::default().dim()),
+            Span::styled("  ·  ", Style::default().dim()),
+            Span::styled(secondary.to_string(), Style::default().dim()),
+        ]));
+    }
+
+    fn render_option_row(
+        lines: &mut Vec<Line<'static>>,
+        label: String,
+        description: Option<String>,
+        is_selected: bool,
     ) {
+        let marker = if is_selected { ">" } else { " " };
+        let marker_style = if is_selected {
+            Style::default().cyan().bold()
+        } else {
+            Style::default().dim()
+        };
+        let label_style = if is_selected {
+            Style::default().bold()
+        } else {
+            Style::default()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(marker.to_string(), marker_style),
+            Span::raw(" "),
+            Span::styled(label, label_style),
+        ]));
+
+        if let Some(description) = description {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().dim()),
+                Span::styled(description, Style::default().dim()),
+            ]));
+        }
+    }
+
+    fn render_inline_setup(params: &InlineSetupRenderParams, area: Rect, buf: &mut Buffer) {
         if area.height < 3 {
             return;
         }
@@ -1082,140 +1259,178 @@ impl OnboardingWidget {
 
         let mut lines: Vec<Line<'static>> = Vec::new();
 
-        // Model slug header.
         lines.push(Line::from(vec![Span::styled(
-            format!("Model: {model}"),
+            "Configure provider binding",
+            Style::default().bold(),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("Model profile: {}", params.model),
             Style::default().dim(),
         )]));
-
-        // Provider name.
-        lines.push(Line::from("|"));
-        if active_field == &InlineField::ProviderName {
-            Self::render_active_field(
-                &mut lines,
-                "provider name:",
-                "Enter a name to recognize this provider later.",
-                input,
-                cursor_pos,
-            );
-        } else {
-            Self::render_completed_field(&mut lines, "provider name:", provider_name);
-        }
-
-        // Base URL.
-        lines.push(Line::from("|"));
-        if active_field == &InlineField::BaseUrl {
-            Self::render_active_field(
-                &mut lines,
-                "base url:",
-                "Enter the provider API base URL.",
-                input,
-                cursor_pos,
-            );
-        } else {
-            Self::render_completed_field(&mut lines, "base url:", base_url);
-        }
-
-        // API key.
-        lines.push(Line::from("|"));
-        if active_field == &InlineField::ApiKey {
-            Self::render_active_field(
-                &mut lines,
-                "api key:",
-                "Enter the API key for this provider.",
-                input,
-                cursor_pos,
-            );
-        } else {
-            let masked = if api_key.is_empty() {
-                "(skip)"
-            } else {
-                "••••••••"
-            };
-            Self::render_completed_field(&mut lines, "api key:", masked);
-        }
-
-        // Model name.
-        lines.push(Line::from("|"));
-        if active_field == &InlineField::ModelName {
-            Self::render_active_field(
-                &mut lines,
-                "model name:",
-                "Enter the model name this provider expects.",
-                input,
-                cursor_pos,
-            );
-        } else {
-            Self::render_completed_field(&mut lines, "model name:", model_name);
-        }
-
-        // Display name.
-        lines.push(Line::from("|"));
-        if active_field == &InlineField::DisplayName {
-            Self::render_active_field(
-                &mut lines,
-                "display name:",
-                "Enter the name clients should show for this model.",
-                input,
-                cursor_pos,
-            );
-        } else {
-            Self::render_completed_field(&mut lines, "display name:", display_name);
-        }
-
-        // Footer.
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Enter", Style::default().dim()),
-            Span::styled(": next field", Style::default().dim()),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("Esc", Style::default().dim()),
-            Span::styled(": back", Style::default().dim()),
-        ]));
+
+        Self::render_inline_field(
+            &mut lines,
+            params,
+            InlineField::ProviderName,
+            "Provider Name",
+            "Enter a name to recognize this provider later.",
+            params.provider_name,
+            false,
+        );
+        Self::render_inline_field(
+            &mut lines,
+            params,
+            InlineField::BaseUrl,
+            "Base URL",
+            "Enter the provider API base URL.",
+            params.base_url,
+            false,
+        );
+        Self::render_inline_field(
+            &mut lines,
+            params,
+            InlineField::ApiKey,
+            "API Key",
+            "Enter the API key for this provider.",
+            params.api_key,
+            true,
+        );
+        Self::render_inline_field(
+            &mut lines,
+            params,
+            InlineField::ModelName,
+            "Model Name",
+            "Enter the model name this provider expects.",
+            params.model_name,
+            false,
+        );
+        Self::render_inline_field(
+            &mut lines,
+            params,
+            InlineField::DisplayName,
+            "Display Name",
+            "Enter the name clients should show for this model.",
+            params.display_name,
+            false,
+        );
+        Self::render_pending_workflow_step(
+            &mut lines,
+            "Invocation Method",
+            "Choose the API protocol.",
+            "[open popup]",
+        );
+        if params.supports_reasoning {
+            Self::render_pending_workflow_step(
+                &mut lines,
+                "Reason Effort",
+                "Choose the default reasoning effort for this model. It can be changed with /model.",
+                "[open popup]",
+            );
+        }
+        Self::render_pending_workflow_step(&mut lines, "Validation Done", "", "");
+
+        Self::render_footer(&mut lines, "Enter next field", "Esc back");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .render(content_area, buf);
     }
 
-    fn render_active_field(
+    fn render_inline_field(
+        lines: &mut Vec<Line<'static>>,
+        params: &InlineSetupRenderParams,
+        field: InlineField,
+        label: &str,
+        hint: &str,
+        value: &str,
+        secret: bool,
+    ) {
+        let active_index = Self::inline_field_index(*params.active_field);
+        let field_index = Self::inline_field_index(field);
+        let is_active = field == *params.active_field;
+        let is_done = field_index < active_index;
+        let rail_style = if is_active {
+            Style::default().cyan().bold()
+        } else if is_done {
+            Style::default().green()
+        } else {
+            Style::default().dim()
+        };
+        let label_style = if is_active {
+            Style::default().bold()
+        } else {
+            Style::default().dim()
+        };
+        let shown_value = if is_active {
+            Self::input_with_cursor(params.input, params.cursor_pos)
+        } else if secret && !value.is_empty() {
+            "••••••••".to_string()
+        } else if value.is_empty() && is_done {
+            "(skip)".to_string()
+        } else if value.is_empty() {
+            "...".to_string()
+        } else {
+            value.to_string()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("● ", rail_style),
+            Span::raw(" "),
+            Span::styled(format!("{label}: "), label_style),
+            Span::styled(hint.to_string(), Style::default().dim()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("| ", rail_style),
+            Span::styled(
+                shown_value,
+                if is_active {
+                    Style::default()
+                } else {
+                    Style::default().dim()
+                },
+            ),
+        ]));
+        lines.push(Line::from(vec![Span::styled("|", rail_style)]));
+    }
+
+    fn render_pending_workflow_step(
         lines: &mut Vec<Line<'static>>,
         label: &str,
         hint: &str,
-        input: &str,
-        cursor_pos: usize,
+        value: &str,
     ) {
-        lines.push(Line::from(vec![Span::styled(
-            format!("* {label}"),
-            Style::default().bold(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            format!("| Hint: {hint}"),
-            Style::default().dim(),
-        )]));
+        lines.push(Line::from(vec![
+            Span::styled("●  ", Style::default().dim()),
+            Span::styled(format!("{label}: "), Style::default().dim()),
+            Span::styled(hint.to_string(), Style::default().dim()),
+        ]));
+        if !value.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("| ", Style::default().dim()),
+                Span::styled(value.to_string(), Style::default().dim()),
+            ]));
+        }
+        lines.push(Line::from(vec![Span::styled("|", Style::default().dim())]));
+    }
+
+    fn input_with_cursor(input: &str, cursor_pos: usize) -> String {
         let byte_pos = input
             .char_indices()
             .nth(cursor_pos.min(input.chars().count()))
             .map(|(i, _)| i)
             .unwrap_or(input.len());
-        let before_cursor = input[..byte_pos].to_string();
-        lines.push(Line::from(vec![
-            Span::styled("| ", Style::default()),
-            Span::styled(before_cursor, Style::default()),
-            Span::styled("▌", Style::default().cyan()),
-        ]));
+        format!("{}▌{}", &input[..byte_pos], &input[byte_pos..])
     }
 
-    fn render_completed_field(lines: &mut Vec<Line<'static>>, label: &str, value: &str) {
-        lines.push(Line::from(vec![Span::styled(
-            format!("* {label}"),
-            Style::default().dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            format!("| {value}"),
-            Style::default().dim(),
-        )]));
+    fn inline_field_index(field: InlineField) -> usize {
+        match field {
+            InlineField::ProviderName => 0,
+            InlineField::BaseUrl => 1,
+            InlineField::ApiKey => 2,
+            InlineField::ModelName => 3,
+            InlineField::DisplayName => 4,
+        }
     }
 
     // ── Rendering: Popup Lists ──
@@ -1235,23 +1450,23 @@ impl OnboardingWidget {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         lines.push(Line::from(vec![Span::styled(
-            "Select Model Slug",
+            "Choose model profile",
             Style::default().bold(),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            "Hint: Choose the model capability profile the program should use.",
+            "Type to filter built-in model capabilities.",
             Style::default().dim(),
         )]));
         lines.push(Line::from(""));
 
         if search_query.is_empty() {
             lines.push(Line::from(vec![Span::styled(
-                "Search: ",
+                "filter: all",
                 Style::default().dim(),
             )]));
         } else {
             lines.push(Line::from(vec![
-                Span::styled("Search: ", Style::default().dim()),
+                Span::styled("filter: ", Style::default().dim()),
                 Span::styled(search_query.to_string(), Style::default()),
             ]));
         }
@@ -1277,35 +1492,16 @@ impl OnboardingWidget {
         {
             if let Some(item) = items.get(actual_idx) {
                 let is_selected = state.selected_idx == Some(vis_idx);
-                let prefix = if is_selected { "> " } else { "  " };
-                let name_style = if is_selected {
-                    Style::default().bold()
+                let description = if item.display_name == item.slug {
+                    None
                 } else {
-                    Style::default()
+                    Some(item.display_name.clone())
                 };
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        prefix.to_string(),
-                        if is_selected {
-                            Style::default().cyan()
-                        } else {
-                            Style::default()
-                        },
-                    ),
-                    Span::styled(item.slug.clone(), name_style),
-                ]));
+                Self::render_option_row(&mut lines, item.slug.clone(), description, is_selected);
             }
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Enter: select and close popup",
-            Style::default().dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: cancel",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Enter select", "Esc cancel");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1320,11 +1516,11 @@ impl OnboardingWidget {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         lines.push(Line::from(vec![Span::styled(
-            "Enter Model Slug",
+            "Custom model profile",
             Style::default().bold(),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            "Hint: Type the model slug for your custom model.",
+            "Enter the model slug to use as the local capability profile.",
             Style::default().dim(),
         )]));
         lines.push(Line::from(""));
@@ -1334,21 +1530,14 @@ impl OnboardingWidget {
             .nth(cursor_pos.min(input.chars().count()))
             .map(|(i, _)| i)
             .unwrap_or(input.len());
-        let before_cursor = input[..byte_pos].to_string();
         lines.push(Line::from(vec![
             Span::styled("> ", Style::default().cyan()),
-            Span::styled(before_cursor, Style::default()),
-            Span::styled("▌", Style::default().cyan()),
+            Span::styled(
+                format!("{}▌{}", &input[..byte_pos], &input[byte_pos..]),
+                Style::default(),
+            ),
         ]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Enter: confirm",
-            Style::default().dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: back",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Enter confirm", "Esc back");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1356,7 +1545,7 @@ impl OnboardingWidget {
     }
 
     fn render_provider_selection(
-        model: &str,
+        _model: &str,
         items: &[ProviderSelectionItem],
         selected_idx: usize,
         area: Rect,
@@ -1369,49 +1558,26 @@ impl OnboardingWidget {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         lines.push(Line::from(vec![Span::styled(
-            "Select Provider",
+            "Choose provider vendor",
             Style::default().bold(),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            "Hint: Choose a provider or add one.",
+            "Select a configured endpoint, or add a new vendor. Wire API comes next.",
             Style::default().dim(),
         )]));
         lines.push(Line::from(""));
 
         for (idx, item) in items.iter().enumerate() {
             let is_selected = idx == selected_idx;
-            let prefix = if is_selected { "> " } else { "  " };
-            let name_style = if is_selected {
-                Style::default().bold()
-            } else {
-                Style::default()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix.to_string(),
-                    if is_selected {
-                        Style::default().cyan()
-                    } else {
-                        Style::default()
-                    },
-                ),
-                Span::styled(item.label.clone(), name_style),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(item.description.clone(), Style::default().dim()),
-            ]));
+            Self::render_option_row(
+                &mut lines,
+                item.label.clone(),
+                Some(item.description.clone()),
+                is_selected,
+            );
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Enter: select and close popup",
-            Style::default().dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: back",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Enter select", "Esc back");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1431,49 +1597,26 @@ impl OnboardingWidget {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         lines.push(Line::from(vec![Span::styled(
-            "Invocation Method",
+            "Choose wire API",
             Style::default().bold(),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            "Hint: Choose the API protocol used to call this model.",
+            "This is the provider protocol, not the provider vendor.",
             Style::default().dim(),
         )]));
         lines.push(Line::from(""));
 
         for (idx, item) in items.iter().enumerate() {
             let is_selected = idx == selected_idx;
-            let prefix = if is_selected { "> " } else { "  " };
-            let name_style = if is_selected {
-                Style::default().bold()
-            } else {
-                Style::default()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix.to_string(),
-                    if is_selected {
-                        Style::default().cyan()
-                    } else {
-                        Style::default()
-                    },
-                ),
-                Span::styled(item.label.clone(), name_style),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(item.description.clone(), Style::default().dim()),
-            ]));
+            Self::render_option_row(
+                &mut lines,
+                item.label.clone(),
+                Some(item.description.clone()),
+                is_selected,
+            );
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Enter: select and close popup",
-            Style::default().dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: back",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Enter select", "Esc back");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1493,45 +1636,21 @@ impl OnboardingWidget {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         lines.push(Line::from(vec![Span::styled(
-            "Reasoning Effort",
+            "Default reasoning",
             Style::default().bold(),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            "Hint: Choose the default reasoning effort for this model binding.",
+            "Choose the effort stored on this model binding.",
             Style::default().dim(),
         )]));
         lines.push(Line::from(""));
 
         for (idx, item) in items.iter().enumerate() {
             let is_selected = idx == selected_idx;
-            let prefix = if is_selected { "> " } else { "  " };
-            let name_style = if is_selected {
-                Style::default().bold()
-            } else {
-                Style::default()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix.to_string(),
-                    if is_selected {
-                        Style::default().cyan()
-                    } else {
-                        Style::default()
-                    },
-                ),
-                Span::styled(item.label.clone(), name_style),
-            ]));
+            Self::render_option_row(&mut lines, item.label.clone(), None, is_selected);
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Enter: select and close popup",
-            Style::default().dim(),
-        )]));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: back",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Enter select", "Esc back");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1556,28 +1675,31 @@ impl OnboardingWidget {
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(vec![Span::styled(
-            "Validating...",
+            "Testing provider binding",
             Style::default().bold(),
         )]));
         lines.push(Line::from(vec![Span::styled(
-            format!("Model: {model} ({provider_name})"),
+            format!("model: {model}  ·  wire API: {provider_name}"),
             Style::default().dim(),
         )]));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::raw("  "),
+            Span::styled("│ ", Style::default().cyan()),
             spinner(Some(started_at), animations_enabled),
-            Span::raw(" Connecting to API..."),
+            Span::raw("  server validation in progress"),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("│   ", Style::default().cyan()),
+            Span::styled(
+                "resolving config, auth, provider SDK, and model name",
+                Style::default().dim(),
+            ),
         ]));
         lines.push(Line::from(vec![Span::styled(
-            format!("  Timeout: {remaining}s remaining"),
+            format!("│   timeout: {remaining}s remaining"),
             Style::default().dim(),
         )]));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: cancel",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Esc cancel", "");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1602,10 +1724,13 @@ impl OnboardingWidget {
 
         let mut lines: Vec<Line<'static>> = vec![
             Line::from(vec![Span::styled(
-                "✗ Validation Failed",
+                "Validation failed",
                 Style::default().bold().red(),
             )]),
-            Line::from(""),
+            Line::from(vec![Span::styled(
+                "The server could not build or probe this provider binding.",
+                Style::default().dim(),
+            )]),
             Line::from(vec![Span::styled(
                 error_message.to_string(),
                 Style::default().red(),
@@ -1615,30 +1740,10 @@ impl OnboardingWidget {
 
         for (idx, action) in actions.iter().enumerate() {
             let is_selected = idx == selected_action;
-            let prefix = if is_selected { "> " } else { "  " };
-            let style = if is_selected {
-                Style::default().bold()
-            } else {
-                Style::default().dim()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix.to_string(),
-                    if is_selected {
-                        Style::default().cyan()
-                    } else {
-                        Style::default()
-                    },
-                ),
-                Span::styled(action.to_string(), style),
-            ]));
+            Self::render_option_row(&mut lines, action.to_string(), None, is_selected);
         }
 
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Esc: exit onboarding",
-            Style::default().dim(),
-        )]));
+        Self::render_footer(&mut lines, "Enter select", "Esc exit onboarding");
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -1690,7 +1795,13 @@ impl Renderable for OnboardingWidget {
             }
             OnboardingState::CustomModelName { .. } => 8,
             OnboardingState::ProviderSelection { items, .. } => items.len() as u16 * 2 + 6,
-            OnboardingState::InlineSetup { .. } => 20,
+            OnboardingState::InlineSetup { model, .. } => {
+                if self.model_supports_reasoning(model) {
+                    31
+                } else {
+                    28
+                }
+            }
             OnboardingState::InvocationMethod { items, .. } => items.len() as u16 * 2 + 6,
             OnboardingState::ReasoningEffort { items, .. } => items.len() as u16 + 6,
             OnboardingState::Validating { .. } => 10,
@@ -1738,15 +1849,18 @@ impl Renderable for OnboardingWidget {
                 ..
             } => {
                 Self::render_inline_setup(
-                    model,
-                    provider_name,
-                    base_url,
-                    api_key,
-                    model_name,
-                    display_name,
-                    active_field,
-                    input,
-                    *cursor_pos,
+                    &InlineSetupRenderParams {
+                        model,
+                        supports_reasoning: self.model_supports_reasoning(model),
+                        provider_name,
+                        base_url,
+                        api_key,
+                        model_name,
+                        display_name,
+                        active_field,
+                        input,
+                        cursor_pos: *cursor_pos,
+                    },
                     area,
                     buf,
                 );
@@ -1766,8 +1880,8 @@ impl Renderable for OnboardingWidget {
                 Self::render_reasoning_effort(items, *selected_idx, area, buf);
             }
             OnboardingState::Validating {
-                model,
-                provider,
+                model_slug,
+                invocation_method,
                 started_at,
                 ..
             } => {
@@ -1775,8 +1889,8 @@ impl Renderable for OnboardingWidget {
                     self.frame_requester.schedule_frame_in(SPINNER_INTERVAL);
                 }
                 Self::render_validating(
-                    model,
-                    *provider,
+                    model_slug,
+                    *invocation_method,
                     *started_at,
                     self.animations_enabled,
                     area,

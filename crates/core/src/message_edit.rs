@@ -5,13 +5,12 @@
 
 use chrono::Utc;
 
-use devo_protocol::{ItemId, SessionId, TurnId, TurnKind, TurnStatus};
+use devo_protocol::{ItemId, SessionId, TurnId};
 
 use crate::durable_record::{
     ContentPart, DurableRecord, EditId, EditState, FileRestoreOutcome, Mention,
-    MessageEditRecordedRecord, RestoreFileStatus, RestoreId, SessionCreatedRecord,
-    TurnStartedRecord, TurnSupersededRecord, TurnWorkspaceRestoreCompletedRecord,
-    TurnWorkspaceRestoreStartedRecord, WorkspaceRestorePolicy,
+    MessageEditRecordedRecord, RestoreId, TurnSupersededRecord,
+    TurnWorkspaceRestoreCompletedRecord, TurnWorkspaceRestoreStartedRecord, WorkspaceRestorePolicy,
 };
 
 // ── Edit Eligibility ────────────────────────────────────────────────
@@ -29,10 +28,10 @@ pub fn check_edit_eligibility(
     }
 
     // Reject if target doesn't match expected
-    if let Some(expected) = expected_target_message_id {
-        if expected != target_message_id {
-            return Err(EditError::ExpectedTargetMessageMismatch);
-        }
+    if let Some(expected) = expected_target_message_id
+        && expected != target_message_id
+    {
+        return Err(EditError::ExpectedTargetMessageMismatch);
     }
 
     // Reject if not the immediately preceding message
@@ -173,6 +172,7 @@ pub enum EditError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RestoreFileStatus;
 
     #[test]
     fn eligible_message_passes_check() {
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn workspace_restore_planning() {
-        let (record, restore_id) = plan_workspace_restore(
+        let (record, _restore_id) = plan_workspace_restore(
             SessionId::new(),
             TurnId::new(),
             vec!["src/main.rs".into()],

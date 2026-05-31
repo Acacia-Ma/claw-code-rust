@@ -10,10 +10,7 @@ use chrono::{DateTime, Utc};
 
 use devo_protocol::{ItemId, SessionId, TurnId, TurnKind, TurnStatus, TurnUsage};
 
-use crate::durable_record::{
-    DurableRecord, ItemCompletedRecord, ItemFailedRecord, ItemStartedRecord, SessionCreatedRecord,
-    TurnCompletedRecord, TurnFailedRecord, TurnInterruptedRecord, TurnStartedRecord,
-};
+use crate::durable_record::DurableRecord;
 
 // ── Projection Types ────────────────────────────────────────────────
 
@@ -93,7 +90,7 @@ pub fn build_replay_projection(
         is_active: false,
     };
 
-    let mut turns: Vec<TurnProjection> = Vec::new();
+    let _turns: Vec<TurnProjection> = Vec::new();
     let mut turn_map: HashMap<TurnId, TurnProjection> = HashMap::new();
     let mut pending_items: HashMap<ItemId, PendingItemProjection> = HashMap::new();
     let mut usage_totals = UsageTotals::default();
@@ -180,12 +177,10 @@ pub fn build_replay_projection(
                 if let Some(turn) = turn_map
                     .values_mut()
                     .find(|t| t.items.iter().any(|i| i.item_id == item_id))
+                    && let Some(item) = turn.items.iter_mut().find(|i| i.item_id == item_id)
+                    && item.content_preview.len() < 200
                 {
-                    if let Some(item) = turn.items.iter_mut().find(|i| i.item_id == item_id) {
-                        if item.content_preview.len() < 200 {
-                            item.content_preview.push_str(&content);
-                        }
-                    }
+                    item.content_preview.push_str(&content);
                 }
             }
 
@@ -195,10 +190,9 @@ pub fn build_replay_projection(
                 if let Some(turn) = turn_map
                     .values_mut()
                     .find(|t| t.items.iter().any(|i| i.item_id == item_id))
+                    && let Some(item) = turn.items.iter_mut().find(|i| i.item_id == item_id)
                 {
-                    if let Some(item) = turn.items.iter_mut().find(|i| i.item_id == item_id) {
-                        item.status = "completed".into();
-                    }
+                    item.status = "completed".into();
                 }
             }
 
@@ -208,10 +202,9 @@ pub fn build_replay_projection(
                 if let Some(turn) = turn_map
                     .values_mut()
                     .find(|t| t.items.iter().any(|i| i.item_id == item_id))
+                    && let Some(item) = turn.items.iter_mut().find(|i| i.item_id == item_id)
                 {
-                    if let Some(item) = turn.items.iter_mut().find(|i| i.item_id == item_id) {
-                        item.status = "failed".into();
-                    }
+                    item.status = "failed".into();
                 }
             }
 

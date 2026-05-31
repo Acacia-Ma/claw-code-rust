@@ -69,6 +69,9 @@ pub enum ClientMethod {
     GoalStatus,
     AgentList,
     AgentStatus,
+    ProviderVendorList,
+    ProviderValidate,
+    ProviderVendorUpsert,
 }
 
 impl ClientMethod {
@@ -98,6 +101,9 @@ impl ClientMethod {
             Self::GoalStatus => "goal/status",
             Self::AgentList => "agent/list",
             Self::AgentStatus => "agent/status",
+            Self::ProviderVendorList => "provider/list",
+            Self::ProviderValidate => "provider/validate",
+            Self::ProviderVendorUpsert => "provider/upsert",
         }
     }
 
@@ -127,6 +133,9 @@ impl ClientMethod {
             "goal/status" => Self::GoalStatus,
             "agent/list" => Self::AgentList,
             "agent/status" => Self::AgentStatus,
+            "provider/list" => Self::ProviderVendorList,
+            "provider/validate" => Self::ProviderValidate,
+            "provider/upsert" => Self::ProviderVendorUpsert,
             _ => return None,
         })
     }
@@ -370,11 +379,17 @@ mod tests {
     fn protocol_error_code_serialization() {
         let codes = vec![
             (ProtocolErrorCode::AlreadyResolved, "AlreadyResolved"),
-            (ProtocolErrorCode::ParentSessionNotFound, "ParentSessionNotFound"),
+            (
+                ProtocolErrorCode::ParentSessionNotFound,
+                "ParentSessionNotFound",
+            ),
             (ProtocolErrorCode::ForkTurnNotFound, "ForkTurnNotFound"),
             (ProtocolErrorCode::ForkTurnNotStable, "ForkTurnNotStable"),
             (ProtocolErrorCode::PermissionDenied, "PermissionDenied"),
-            (ProtocolErrorCode::WorkspaceUnavailable, "WorkspaceUnavailable"),
+            (
+                ProtocolErrorCode::WorkspaceUnavailable,
+                "WorkspaceUnavailable",
+            ),
             (
                 ProtocolErrorCode::InheritedSegmentWriteFailed,
                 "InheritedSegmentWriteFailed",
@@ -383,7 +398,10 @@ mod tests {
                 ProtocolErrorCode::ForkRetentionRequired,
                 "ForkRetentionRequired",
             ),
-            (ProtocolErrorCode::InvalidConfirmToken, "InvalidConfirmToken"),
+            (
+                ProtocolErrorCode::InvalidConfirmToken,
+                "InvalidConfirmToken",
+            ),
             (
                 ProtocolErrorCode::UnsupportedDeletePolicy,
                 "UnsupportedDeletePolicy",
@@ -404,7 +422,10 @@ mod tests {
                 ProtocolErrorCode::ActiveTurnEditRejected,
                 "ActiveTurnEditRejected",
             ),
-            (ProtocolErrorCode::InvalidContentParts, "InvalidContentParts"),
+            (
+                ProtocolErrorCode::InvalidContentParts,
+                "InvalidContentParts",
+            ),
             (ProtocolErrorCode::InvalidMentions, "InvalidMentions"),
             (
                 ProtocolErrorCode::WorkspaceRestoreFailedToStart,
@@ -413,10 +434,10 @@ mod tests {
         ];
 
         for (code, expected_str) in &codes {
-            let json =
-                serde_json::to_string(&code).unwrap_or_else(|e| panic!("serialize {expected_str}: {e}"));
-            let restored: ProtocolErrorCode =
-                serde_json::from_str(&json).unwrap_or_else(|e| panic!("deserialize {expected_str}: {e}"));
+            let json = serde_json::to_string(&code)
+                .unwrap_or_else(|e| panic!("serialize {expected_str}: {e}"));
+            let restored: ProtocolErrorCode = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("deserialize {expected_str}: {e}"));
             assert_eq!(restored, *code, "roundtrip failed for {expected_str}");
         }
     }

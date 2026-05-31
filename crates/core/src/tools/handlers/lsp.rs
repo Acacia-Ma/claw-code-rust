@@ -11,6 +11,12 @@ pub struct LspHandler {
     spec: ToolSpec,
 }
 
+impl Default for LspHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LspHandler {
     pub fn new() -> Self {
         Self {

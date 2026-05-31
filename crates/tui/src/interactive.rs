@@ -23,8 +23,10 @@ use crate::chatwidget::ChatWidgetInit;
 use crate::chatwidget::TuiSessionState;
 use crate::events::WorkerEvent;
 use crate::host_overlay::OverlayState;
+use crate::onboarding::OnboardingModelBinding;
+use crate::onboarding::onboarding_provider_model_binding;
+use crate::onboarding::onboarding_provider_vendor;
 use crate::onboarding::save_last_used_model;
-use crate::onboarding::save_onboarding_config;
 use crate::onboarding::save_project_permission_preset;
 use crate::onboarding::save_thinking_selection;
 use crate::render::renderable::Renderable;
@@ -37,10 +39,42 @@ const APP_EVENT_CHANNEL_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone)]
 struct PendingOnboarding {
-    provider: ProviderWireApi,
-    model: String,
+    binding: OnboardingModelBinding,
     base_url: Option<String>,
     api_key: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OnboardingCommandPayload {
+    model_slug: String,
+    model_name: String,
+    display_name: String,
+    provider_id: String,
+    provider_name: String,
+    invocation_method: ProviderWireApi,
+    default_reasoning_effort: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+}
+
+fn parse_onboarding_command(command: &str) -> Option<OnboardingCommandPayload> {
+    let payload = command.strip_prefix("onboard ")?;
+    serde_json::from_str(payload).ok()
+}
+
+fn normalized_display_name(
+    model_catalog: &impl ModelCatalog,
+    model_slug: &str,
+    selected_display_name: &str,
+) -> String {
+    let selected = selected_display_name.trim();
+    if !selected.is_empty() && selected != model_slug {
+        return selected.to_string();
+    }
+    model_catalog
+        .get(model_slug)
+        .map(|model| model.display_name.clone())
+        .unwrap_or_else(|| model_slug.to_string())
 }
 
 #[derive(Debug, Default)]
@@ -391,6 +425,13 @@ fn handle_tui_event(
             })?;
         }
         TuiEvent::Key(key) => {
+            if chat_widget.handle_onboarding_key_event(key) {
+                return Ok(LoopAction::Continue);
+            }
+            if chat_widget.is_onboarding_active() && ChatWidget::is_copy_shortcut(key) {
+                return Ok(LoopAction::Continue);
+            }
+
             if matches!(
                 key.code,
                 KeyCode::Enter | KeyCode::Char('\n' | '\r') | KeyCode::Modifier(_)
@@ -408,10 +449,6 @@ fn handle_tui_event(
             // Keep Ctrl-C available for terminal copy workflows while work is
             // active. Cancellation is owned by the bottom pane's Esc flow.
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                // During onboarding, Ctrl-C exits immediately.
-                if chat_widget.is_onboarding_active() {
-                    return Ok(LoopAction::ClearAndExit);
-                }
                 match handle_ctrl_c_key(loop_state, Instant::now()) {
                     CtrlCKeyAction::PromptInterruptWithEsc => {
                         chat_widget.set_status_message("Press Esc twice to interrupt");
@@ -423,13 +460,6 @@ fn handle_tui_event(
                         return Ok(LoopAction::ClearAndExit);
                     }
                 }
-                return Ok(LoopAction::Continue);
-            }
-
-            // During onboarding, bypass host-level key handling (Ctrl+T, esc-backtrack)
-            // and route directly to the chat widget which owns the onboarding flow.
-            if chat_widget.is_onboarding_active() {
-                chat_widget.handle_key_event(key);
                 return Ok(LoopAction::Continue);
             }
 
@@ -618,17 +648,29 @@ fn handle_worker_event(
             loop_state.total_cache_read_tokens = *next_total_cache_read_tokens;
         }
         WorkerEvent::ProviderValidationSucceeded { .. } => {
-            if let Some(pending) = loop_state.pending_onboarding.take() {
-                // Persist successful onboarding before switching the worker provider.
-                save_onboarding_config(
-                    pending.provider,
-                    &pending.model,
+            if let Some(pending) = loop_state.pending_onboarding.as_ref() {
+                let provider_vendor = onboarding_provider_vendor(
+                    &pending.binding,
                     pending.base_url.as_deref(),
                     pending.api_key.as_deref(),
+                );
+                let model_binding = onboarding_provider_model_binding(
+                    &pending.binding,
+                    pending.base_url.as_deref(),
+                );
+                worker.upsert_provider_vendor(
+                    provider_vendor,
+                    Some(model_binding.clone()),
+                    Some(model_binding.binding_id),
+                    pending.api_key.clone(),
                 )?;
+            }
+        }
+        WorkerEvent::ProviderVendorUpserted { .. } => {
+            if let Some(pending) = loop_state.pending_onboarding.take() {
                 worker.reconfigure_provider(
-                    pending.provider,
-                    pending.model,
+                    pending.binding.invocation_method,
+                    pending.binding.model_name,
                     pending.base_url,
                     pending.api_key,
                 )?;
@@ -677,6 +719,7 @@ fn handle_worker_event(
         | WorkerEvent::ToolResult { .. }
         | WorkerEvent::PatchApplied { .. }
         | WorkerEvent::PlanUpdated { .. }
+        | WorkerEvent::ProviderVendorsListed { .. }
         | WorkerEvent::SessionsListed { .. }
         | WorkerEvent::SkillsListed { .. }
         | WorkerEvent::NewSessionPrepared { .. }
@@ -792,8 +835,51 @@ fn handle_app_command(
                 }
                 loop_state.resume_browser_pending = true;
                 chat_widget.set_status_message("Loading sessions");
+            } else if command == "provider list" {
+                worker.list_provider_vendors()?;
             } else if command == "session new" {
                 worker.start_new_session()?;
+            } else if let Some(payload) = parse_onboarding_command(command) {
+                if context.model_catalog.get(&payload.model_slug).is_none() {
+                    chat_widget.set_status_message(format!(
+                        "Unsupported model slug: {}",
+                        payload.model_slug
+                    ));
+                    return Ok(());
+                }
+                let display_name = normalized_display_name(
+                    context.model_catalog,
+                    &payload.model_slug,
+                    &payload.display_name,
+                );
+                let binding = OnboardingModelBinding {
+                    model_slug: payload.model_slug,
+                    model_name: payload.model_name,
+                    display_name,
+                    provider_id: payload.provider_id,
+                    provider_name: payload.provider_name,
+                    invocation_method: payload.invocation_method,
+                    default_reasoning_effort: payload.default_reasoning_effort,
+                };
+                worker.list_provider_vendors()?;
+                let provider_vendor = onboarding_provider_vendor(
+                    &binding,
+                    payload.base_url.as_deref(),
+                    payload.api_key.as_deref(),
+                );
+                let model_binding =
+                    onboarding_provider_model_binding(&binding, payload.base_url.as_deref());
+                worker.validate_provider(
+                    provider_vendor,
+                    model_binding,
+                    payload.api_key.clone(),
+                )?;
+                loop_state.pending_onboarding = Some(PendingOnboarding {
+                    binding,
+                    base_url: payload.base_url,
+                    api_key: payload.api_key,
+                });
+                chat_widget.set_status_message("Validating provider");
             } else {
                 chat_widget.set_status_message(format!("Unsupported command: {}", command));
             }

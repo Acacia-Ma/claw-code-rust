@@ -17,6 +17,12 @@ pub struct ShellCommandHandler {
     spec: ToolSpec,
 }
 
+impl Default for ShellCommandHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShellCommandHandler {
     pub fn new() -> Self {
         Self {

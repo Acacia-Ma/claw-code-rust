@@ -22,9 +22,9 @@ mod exec_cell;
 mod exec_command;
 mod get_git_diff;
 mod history_cell;
-mod host;
 mod host_overlay;
 mod insert_history;
+mod interactive;
 mod key_hint;
 mod line_truncation;
 mod live_wrap;
@@ -55,7 +55,7 @@ mod version;
 mod worker;
 mod wrapping;
 
-pub use host::run_interactive_tui;
+pub use interactive::run_interactive_tui;
 
 pub use app::AppExit;
 pub use app::InitialTuiSession;

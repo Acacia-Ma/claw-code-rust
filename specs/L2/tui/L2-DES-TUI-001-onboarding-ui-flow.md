@@ -88,34 +88,28 @@ Esc: back
 
 Model: openai/gpt-5.5
 |
-* provider name:
-| Hint: Enter a name to recognize this provider later.
-| OpenRouter
+● Provider Name: Enter a name to recognize this provider later.
 |
-* base url:
-| Hint: Enter the provider API base URL.
-| https://api.example
 |
-* api key:
-| Hint: Enter the API key for this provider.
-| [hidden input]
+● Base URL: Enter the provider API base URL
 |
-* model name:
-| Hint: Enter the model name this provider expects.
-| openai/gpt-5.5
 |
-* display name:
-| Hint: Enter the name clients should show for this model.
-| GPT 5.5
+● APIKEY: the API key for this provider 
 |
-* invocation method:
-| Hint: Choose the API protocol used for this binding.
+|
+● Model Name: the model name this provider expects.
+|
+|
+● Display Name: Enter the name should show for this model
+|
+|
+● Invocation Method: Choose the API protocol
 | [open popup]
 |
-* reasoning effort:
-| Hint: Choose the default reasoning effort for this binding.
+● Reason Effort: Choose the default reasoning effort for mode, could be change with '/model'
 | [open popup if the model supports reasoning]
 |
+● Validation Done
 
 Invocation Method
 Hint: Choose the API protocol used to call this model.

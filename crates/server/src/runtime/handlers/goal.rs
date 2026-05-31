@@ -1,6 +1,7 @@
 //! Goal lifecycle handlers — create, pause, resume, complete, cancel, clear.
 //!
 //! Implements L3-BEH-SERVER-004 client protocol surface.
+#![allow(dead_code)]
 
 use devo_protocol::SessionId;
 use serde::{Deserialize, Serialize};

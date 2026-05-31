@@ -17,6 +17,12 @@ pub struct WebFetchHandler {
     spec: ToolSpec,
 }
 
+impl Default for WebFetchHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebFetchHandler {
     pub fn new() -> Self {
         Self {

@@ -14,6 +14,12 @@ pub struct GrepHandler {
     spec: ToolSpec,
 }
 
+impl Default for GrepHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GrepHandler {
     pub fn new() -> Self {
         Self {

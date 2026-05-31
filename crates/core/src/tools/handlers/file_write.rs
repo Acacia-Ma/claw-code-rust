@@ -17,6 +17,12 @@ pub struct WriteHandler {
     spec: ToolSpec,
 }
 
+impl Default for WriteHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WriteHandler {
     pub fn new() -> Self {
         Self {

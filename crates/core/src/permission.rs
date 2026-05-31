@@ -10,8 +10,6 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use devo_protocol::SessionId;
-
 // ── Permission Types ────────────────────────────────────────────────
 
 /// Resolved permission profile for a session.
@@ -39,23 +37,12 @@ pub enum AccessMode {
 }
 
 /// Network access policy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct NetworkPolicy {
     pub enabled: bool,
     pub allowed_domains: Vec<String>,
     pub denied_domains: Vec<String>,
     pub proxy_url: Option<String>,
-}
-
-impl Default for NetworkPolicy {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            allowed_domains: vec![],
-            denied_domains: vec![],
-            proxy_url: None,
-        }
-    }
 }
 
 /// Runtime permission profile with workspace roots and per-call additions.
@@ -191,7 +178,7 @@ pub fn resolve_access(path: &Path, profile: &PermissionProfile) -> AccessMode {
     let mut best_len = 0;
 
     for entry in &profile.filesystem_policy {
-        if let Ok(stripped) = canonical.strip_prefix(&entry.path) {
+        if let Ok(_stripped) = canonical.strip_prefix(&entry.path) {
             // Longest prefix match wins
             let prefix_len = entry.path.as_os_str().len();
             if prefix_len > best_len {
@@ -199,10 +186,10 @@ pub fn resolve_access(path: &Path, profile: &PermissionProfile) -> AccessMode {
                 best_match = Some(entry);
             } else if prefix_len == best_len {
                 // At equal specificity: None > Write > Read
-                if let Some(current) = best_match {
-                    if entry.access > current.access {
-                        best_match = Some(entry);
-                    }
+                if let Some(current) = best_match
+                    && entry.access > current.access
+                {
+                    best_match = Some(entry);
                 }
             }
         }
@@ -322,6 +309,12 @@ pub enum PermissionDecision {
 /// Unique identifier for an approval request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ApprovalId(pub uuid::Uuid);
+
+impl Default for ApprovalId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ApprovalId {
     pub fn new() -> Self {
@@ -725,7 +718,7 @@ mod tests {
             profile
                 .filesystem_policy
                 .iter()
-                .any(|e| e.path == PathBuf::from("/tmp/test") && e.access == AccessMode::Write)
+                .any(|e| e.path == Path::new("/tmp/test") && e.access == AccessMode::Write)
         );
     }
 

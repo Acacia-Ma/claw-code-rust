@@ -237,7 +237,7 @@ pub fn assemble_deferred_tool_prompt(
 pub fn execute_tool_search(
     query: &str,
     all_tools: &[ToolDefinition],
-    loaded: &mut LoadedDeferredTools,
+    _loaded: &mut LoadedDeferredTools,
     config: &DeferredLoadingConfig,
 ) -> Result<ToolSearchResult, String> {
     let Some(selection) = query

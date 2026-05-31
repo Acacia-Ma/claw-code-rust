@@ -977,7 +977,7 @@ fn permissions_command_opens_bottom_pane_picker_and_updates_default() {
     let rendered = rendered_rows(&widget, 100, 18).join("\n");
     assert!(rendered.contains("Update Model Permissions"));
     assert!(rendered.contains("Read Only"));
-    assert!(rendered.contains("Default (current)"));
+    assert!(rendered.contains("● 2. Default"));
     assert!(rendered.contains("Auto-review"));
     assert!(rendered.contains("Full Access"));
 
@@ -1021,7 +1021,7 @@ fn permissions_command_marks_initial_project_preset_current() {
     });
 
     let rendered = rendered_rows(&widget, 100, 18).join("\n");
-    assert!(rendered.contains("Full Access (current)"));
+    assert!(rendered.contains("● 4. Full Access"));
 }
 
 #[test]
@@ -1797,6 +1797,22 @@ fn onboarding_validation_succeeded_clears_active_state() {
     assert_eq!(widget.placeholder_text(), "Ask Devo");
 }
 
+#[test]
+fn onboarding_paste_does_not_write_to_composer() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = onboarding_widget_with_model(model, cwd);
+
+    widget.handle_paste("https://api.example.com/v1".to_string());
+
+    assert!(widget.is_onboarding_active());
+    assert!(widget.composer_is_empty());
+}
+
 /// Trace: L2-DES-TUI-001
 /// Verifies: Esc during model selection cancels onboarding and exits program
 #[test]
@@ -1837,7 +1853,7 @@ fn onboarding_esc_cancels_onboarding_and_exits() {
 fn onboarding_up_down_navigates_model_list() {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    let cwd = std::env::current_dir().expect("current directory is available");
+    let _cwd = std::env::current_dir().expect("current directory is available");
     let models = vec![
         Model {
             slug: "model-a".to_string(),
@@ -1895,7 +1911,7 @@ fn onboarding_up_down_navigates_model_list() {
 fn onboarding_go_back_restores_model_selection() {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    let cwd = std::env::current_dir().expect("current directory is available");
+    let _cwd = std::env::current_dir().expect("current directory is available");
     let models = vec![
         Model {
             slug: "model-a".to_string(),
@@ -1941,19 +1957,17 @@ fn onboarding_go_back_restores_model_selection() {
 }
 
 /// Trace: L2-DES-TUI-001
-/// Verifies: Custom model entry works from model selection
+/// Verifies: onboarding model selection only offers catalog-backed models
 #[test]
-fn onboarding_custom_model_entry_navigates_to_provider_selection() {
+fn onboarding_model_selection_uses_catalog_models_only() {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    let cwd = std::env::current_dir().expect("current directory is available");
-    let models = vec![
-        Model {
-            slug: "model-a".to_string(),
-            display_name: "Model A".to_string(),
-            ..Model::default()
-        },
-    ];
+    let _cwd = std::env::current_dir().expect("current directory is available");
+    let models = vec![Model {
+        slug: "model-a".to_string(),
+        display_name: "Model A".to_string(),
+        ..Model::default()
+    }];
     let (app_event_tx, _app_event_rx) = mpsc::unbounded_channel();
     let mut widget = crate::onboarding_widget::OnboardingWidget::new(
         &models,
@@ -1962,8 +1976,7 @@ fn onboarding_custom_model_entry_navigates_to_provider_selection() {
         true,
     );
 
-    // Navigate to "Custom Model" (index 1 = model-a + Custom Model sentinel).
-    // model-a is index 0, Custom Model is index 1.
+    // With one catalog model, Down wraps back to that same catalog-backed entry.
     let down = KeyEvent {
         code: KeyCode::Down,
         modifiers: KeyModifiers::NONE,
@@ -1972,7 +1985,7 @@ fn onboarding_custom_model_entry_navigates_to_provider_selection() {
     };
     widget.handle_key_event(down);
 
-    // Select Custom Model.
+    // Select the catalog model.
     let enter = KeyEvent {
         code: KeyCode::Enter,
         modifiers: KeyModifiers::NONE,
@@ -1981,20 +1994,7 @@ fn onboarding_custom_model_entry_navigates_to_provider_selection() {
     };
     widget.handle_key_event(enter);
 
-    // Now type a custom model slug.
-    for ch in "my-custom-model".chars() {
-        widget.handle_key_event(KeyEvent {
-            code: KeyCode::Char(ch),
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        });
-    }
-
-    // Press Enter — should accept the custom model.
-    widget.handle_key_event(enter);
-
-    // Widget should still be active (moved to next step, not completed).
+    // Widget should still be active (moved to provider selection, not completed).
     assert!(!widget.is_complete());
 }
 
@@ -2008,7 +2008,7 @@ fn chatwidget_is_onboarding_active_tracks_state() {
         display_name: "Test Model".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = onboarding_widget_with_model(model, cwd);
+    let (widget, _app_event_rx) = onboarding_widget_with_model(model, cwd);
 
     // Should be active initially.
     assert!(widget.is_onboarding_active());

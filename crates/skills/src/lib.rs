@@ -5,8 +5,8 @@
 //! default-skill installation. Runtime policy lives in core/server.
 
 pub mod installer;
-pub mod parser;
 pub mod package;
+pub mod parser;
 
 pub use installer::{
     DefaultSkillInstallFailure, DefaultSkillInstallMode, DefaultSkillInstallOptions,
@@ -14,7 +14,6 @@ pub use installer::{
 };
 pub use package::{
     FrontmatterFormat, Sha256Digest, SkillCompatibility, SkillDefinition, SkillDiagnostic,
-    SkillName, SkillPackage, SkillPackageId, SkillResourceKind, SkillResourceRef,
-    SkillSourceKind,
+    SkillName, SkillPackage, SkillPackageId, SkillResourceKind, SkillResourceRef, SkillSourceKind,
 };
 pub use parser::parse_skill_md;

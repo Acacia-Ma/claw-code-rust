@@ -17,6 +17,12 @@ pub struct ApplyPatchHandler {
     spec: ToolSpec,
 }
 
+impl Default for ApplyPatchHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApplyPatchHandler {
     pub fn new() -> Self {
         Self {

@@ -14,6 +14,12 @@ pub struct SkillHandler {
     spec: ToolSpec,
 }
 
+impl Default for SkillHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SkillHandler {
     pub fn new() -> Self {
         Self {

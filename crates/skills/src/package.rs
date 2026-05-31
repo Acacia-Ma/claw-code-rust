@@ -28,7 +28,10 @@ impl SkillName {
     pub fn new(raw: &str) -> Result<Self, String> {
         let normalized = raw.trim().to_lowercase();
         if normalized.is_empty() || normalized.len() > 64 {
-            return Err(format!("name length must be 1-64, got {}", normalized.len()));
+            return Err(format!(
+                "name length must be 1-64, got {}",
+                normalized.len()
+            ));
         }
         if !normalized
             .chars()
@@ -188,8 +191,7 @@ mod tests {
             SkillSourceKind::ExternalPackage,
         ] {
             let json = serde_json::to_string(kind).expect("serialize");
-            let restored: SkillSourceKind =
-                serde_json::from_str(&json).expect("deserialize");
+            let restored: SkillSourceKind = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(restored, *kind);
         }
     }
@@ -215,8 +217,7 @@ mod tests {
         ];
         for diag in &diags {
             let json = serde_json::to_string(diag).expect("serialize");
-            let restored: SkillDiagnostic =
-                serde_json::from_str(&json).expect("deserialize");
+            let restored: SkillDiagnostic = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(restored, *diag);
         }
     }
@@ -229,8 +230,7 @@ mod tests {
             FrontmatterFormat::Unknown,
         ] {
             let json = serde_json::to_string(fmt).expect("serialize");
-            let restored: FrontmatterFormat =
-                serde_json::from_str(&json).expect("deserialize");
+            let restored: FrontmatterFormat = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(restored, *fmt);
         }
     }

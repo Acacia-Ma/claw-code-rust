@@ -1,4 +1,5 @@
 mod config;
+#[allow(dead_code)]
 mod config_resolution;
 mod context;
 mod context_pipeline;
@@ -48,8 +49,11 @@ pub(crate) use tools::tool_spec;
 pub(crate) use tools::tool_summary;
 pub(crate) use tools::unified_exec;
 
+#[allow(ambiguous_glob_reexports)]
 pub use config::*;
+#[allow(ambiguous_glob_reexports)]
 pub use context::*;
+#[allow(ambiguous_glob_reexports)]
 pub use context_pipeline::*;
 pub use conversation::*;
 #[allow(ambiguous_glob_reexports)]
@@ -57,6 +61,7 @@ pub use devo_protocol::*;
 pub use devo_protocol::{ContentBlock, Message, Role};
 pub use durable_record::*;
 pub use error::*;
+#[allow(ambiguous_glob_reexports)]
 pub use execution::*;
 pub use fork::*;
 pub use fuzzy_search::*;
@@ -66,11 +71,13 @@ pub use jsonl_store::*;
 pub use logging::*;
 pub use memory::*;
 pub use message_edit::*;
+#[allow(ambiguous_glob_reexports)]
 pub use model_binding::*;
 pub use model_catalog::*;
 pub use model_preset::*;
 pub use permission::*;
 pub use query::*;
+#[allow(ambiguous_glob_reexports)]
 pub use replay::*;
 pub use response_item::*;
 pub use session::*;

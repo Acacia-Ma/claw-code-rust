@@ -75,9 +75,7 @@ impl Default for SandboxPolicy {
             workspace_write: true,
             extra_read_paths: vec![],
             command_allowlist: vec![],
-            command_denylist: vec![
-                "rm".into(), "dd".into(), "mkfs".into(), "shutdown".into(),
-            ],
+            command_denylist: vec!["rm".into(), "dd".into(), "mkfs".into(), "shutdown".into()],
             network_filter: NetworkEgressFilter::default(),
             max_runtime_seconds: Some(300),
             max_output_bytes: Some(1_048_576), // 1MB
@@ -236,7 +234,10 @@ mod tests {
         let err = SandboxError::CommandBlocked("rm -rf".into());
         assert_eq!(err.code(), SandboxErrorCode::CommandBlocked);
 
-        let err = SandboxError::NetworkBlocked { host: "evil.com".into(), port: 443 };
+        let err = SandboxError::NetworkBlocked {
+            host: "evil.com".into(),
+            port: 443,
+        };
         assert_eq!(err.code(), SandboxErrorCode::NetworkBlocked);
     }
 
@@ -251,7 +252,11 @@ mod tests {
     async fn noop_sandbox_passes_commands_through() {
         let sandbox = NoOpSandbox;
         let result = sandbox
-            .constrain_command("ls -la", std::path::Path::new("/tmp"), &SandboxPolicy::default())
+            .constrain_command(
+                "ls -la",
+                std::path::Path::new("/tmp"),
+                &SandboxPolicy::default(),
+            )
             .await
             .expect("should succeed");
         assert_eq!(result, "ls -la");
@@ -259,7 +264,11 @@ mod tests {
 
     #[test]
     fn sandbox_mode_serde_roundtrip() {
-        for mode in &[SandboxMode::Unrestricted, SandboxMode::Restricted, SandboxMode::External] {
+        for mode in &[
+            SandboxMode::Unrestricted,
+            SandboxMode::Restricted,
+            SandboxMode::External,
+        ] {
             let json = serde_json::to_string(mode).expect("serialize");
             let restored: SandboxMode = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(restored, *mode);

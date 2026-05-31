@@ -9,7 +9,7 @@ use devo_protocol::{SessionId, TurnId};
 
 use crate::durable_record::{
     DurableRecord, ForkCreator, ForkOrigin, InheritedHistorySegmentDescriptor, ParentAvailability,
-    RecordRef, SegmentAvailability, SegmentSourceRange, SessionCreatedRecord, SessionForkedRecord,
+    SegmentAvailability, SegmentSourceRange, SessionCreatedRecord, SessionForkedRecord,
     StorageStrategy,
 };
 use crate::session_store::SessionStore;
@@ -47,7 +47,7 @@ pub struct ForkRequest {
 // ── Inherited Segment Construction ──────────────────────────────────
 
 /// Builds an inherited history segment from parent session records.
-pub fn build_inherited_segment(fork_turn_id: TurnId) -> InheritedHistorySegmentDescriptor {
+pub fn build_inherited_segment(_fork_turn_id: TurnId) -> InheritedHistorySegmentDescriptor {
     InheritedHistorySegmentDescriptor {
         inherited_segment_id: format!("seg-{}", uuid::Uuid::new_v4()),
         source_parent_session_id: SessionId::new(), // placeholder

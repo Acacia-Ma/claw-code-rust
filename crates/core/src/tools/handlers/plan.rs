@@ -12,6 +12,12 @@ pub struct PlanHandler {
     spec: ToolSpec,
 }
 
+impl Default for PlanHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlanHandler {
     pub fn new() -> Self {
         Self {

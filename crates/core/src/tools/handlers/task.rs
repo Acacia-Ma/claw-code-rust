@@ -11,6 +11,12 @@ pub struct TaskHandler {
     spec: ToolSpec,
 }
 
+impl Default for TaskHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskHandler {
     pub fn new() -> Self {
         Self {

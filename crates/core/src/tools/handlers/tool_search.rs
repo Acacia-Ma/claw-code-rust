@@ -69,7 +69,7 @@ impl ToolHandler for ToolSearchHandler {
 
     async fn handle(
         &self,
-        ctx: ToolContext,
+        _ctx: ToolContext,
         input: serde_json::Value,
         _progress: Option<ToolProgressSender>,
     ) -> Result<ToolResult, ToolCallError> {
@@ -81,7 +81,7 @@ impl ToolHandler for ToolSearchHandler {
             ToolCallError::InternalError("loaded deferred tool state lock poisoned".into())
         })?;
         let result = execute_tool_search(query, &self.definitions, &mut loaded_tools, &self.config)
-            .map_err(|message| ToolCallError::ExecutionFailed(message))?;
+            .map_err(ToolCallError::ExecutionFailed)?;
 
         Ok(ToolResult::success(
             ToolResultContent::Text(result.summary()),

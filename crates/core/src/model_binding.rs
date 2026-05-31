@@ -116,6 +116,7 @@ pub struct RateLimitConfig {
 
 /// Runtime merge of SupportedModelDefinition + ModelProviderBinding +
 /// session overrides.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedModelProfile {
     pub canonical_model_slug: String,

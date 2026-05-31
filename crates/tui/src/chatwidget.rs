@@ -57,8 +57,6 @@ use crate::bottom_pane::ModelPickerEntry;
 use crate::bottom_pane::list_selection_view::ListSelectionView;
 use crate::bottom_pane::list_selection_view::SelectionItem;
 use crate::bottom_pane::list_selection_view::SelectionViewParams;
-use crate::onboarding_widget::OnboardingResult;
-use crate::onboarding_widget::OnboardingWidget;
 use crate::events::PlanStep;
 use crate::events::PlanStepStatus;
 use crate::events::SessionListEntry;
@@ -76,6 +74,8 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::ScrollbackLine;
 use crate::markdown::append_markdown;
+use crate::onboarding_widget::OnboardingResult;
+use crate::onboarding_widget::OnboardingWidget;
 use crate::render::line_utils::prefix_lines;
 use crate::render::renderable::Renderable;
 use crate::slash_command::SlashCommand;
@@ -301,13 +301,8 @@ fn permission_preset_items(current: devo_protocol::PermissionPreset) -> Vec<Sele
     ]
     .into_iter()
     .map(|(preset, label, description)| {
-        let name = if preset == current {
-            format!("{label} (current)")
-        } else {
-            label.to_string()
-        };
         SelectionItem {
-            name,
+            name: label.to_string(),
             description: Some(description.to_string()),
             is_current: preset == current,
             dismiss_on_select: true,
@@ -1201,6 +1196,9 @@ impl ChatWidget {
             self.handle_resume_browser_key_event(key);
             return;
         }
+        if self.onboarding.is_some() && Self::is_copy_shortcut(key) {
+            return;
+        }
         if let Some(onboarding) = self.onboarding.as_mut() {
             onboarding.handle_key_event(key);
             if let Some(result) = onboarding.take_result() {
@@ -1256,6 +1254,30 @@ impl ChatWidget {
             }
             InputResult::None => {}
         }
+    }
+
+    pub(crate) fn handle_onboarding_key_event(&mut self, key: KeyEvent) -> bool {
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return self.onboarding.is_some();
+        }
+        if self.onboarding.is_some() && Self::is_copy_shortcut(key) {
+            return false;
+        }
+        let Some(onboarding) = self.onboarding.as_mut() else {
+            return false;
+        };
+        onboarding.handle_key_event(key);
+        if let Some(result) = onboarding.take_result() {
+            self.handle_onboarding_result(result);
+        }
+        self.frame_requester.schedule_frame();
+        true
+    }
+
+    pub(crate) fn is_copy_shortcut(key: KeyEvent) -> bool {
+        matches!(key.code, KeyCode::Char('c' | 'C'))
+            && (key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::SUPER))
     }
 
     fn handle_selection_mode_key(&mut self, key: KeyEvent) -> bool {
@@ -1469,6 +1491,11 @@ impl ChatWidget {
 
     pub(crate) fn handle_paste(&mut self, text: String) {
         if self.resume_browser.is_some() {
+            return;
+        }
+        if let Some(onboarding) = self.onboarding.as_mut() {
+            onboarding.handle_paste(text);
+            self.frame_requester.schedule_frame();
             return;
         }
         self.bottom_pane.handle_paste(text);
@@ -2115,6 +2142,17 @@ impl ChatWidget {
                 ));
                 self.set_status_message("Provider validation failed");
             }
+            WorkerEvent::ProviderVendorsListed { provider_vendors } => {
+                if let Some(onboarding) = self.onboarding.as_mut() {
+                    onboarding.on_provider_vendors_listed(provider_vendors);
+                }
+            }
+            WorkerEvent::ProviderVendorUpserted { provider_vendor } => {
+                self.add_to_history(history_cell::new_info_event(
+                    format!("Provider saved: {}", provider_vendor.name),
+                    Some("provider upserted".to_string()),
+                ));
+            }
             WorkerEvent::SessionsListed { sessions } => {
                 self.resume_browser_loading = false;
                 self.open_resume_browser(sessions);
@@ -2506,12 +2544,10 @@ impl ChatWidget {
     fn handle_onboarding_result(&mut self, result: OnboardingResult) {
         match result {
             OnboardingResult::ValidationSucceeded {
-                model,
-                provider: _,
-                base_url: _,
-                api_key: _,
+                model_slug,
+                model_name: _,
             } => {
-                self.update_session_request_model(model);
+                self.update_session_request_model(model_slug);
                 self.add_to_history(history_cell::new_info_event(
                     "Provider configured successfully".to_string(),
                     Some("onboarding complete".to_string()),
@@ -4230,18 +4266,26 @@ impl Renderable for ChatWidget {
                     .skip(scroll_offset)
                     .take(end.saturating_sub(scroll_offset))
                 {
-                    let marker = if index == browser.selection { ">" } else { " " };
-                    let current = if session.is_active { "  current" } else { "" };
+                    let is_selected = index == browser.selection;
+                    let marker = if session.is_active {
+                        "●"
+                    } else if is_selected {
+                        ">"
+                    } else {
+                        " "
+                    };
                     let display_title = Self::pad_display_text(
                         &Self::truncate_display_text(&session.title, title_width),
                         title_width,
                     );
                     let line = format!(
-                        "{marker} {}  {:<16}  {}{}",
-                        display_title, session.session_id, session.updated_at, current
+                        "{marker} {}  {:<16}  {}",
+                        display_title, session.session_id, session.updated_at
                     );
-                    lines.push(if index == browser.selection {
+                    lines.push(if is_selected {
                         Line::from(line).bold()
+                    } else if session.is_active {
+                        Line::from(line).style(Style::default().fg(self.active_accent_color()))
                     } else {
                         Line::from(line)
                     });

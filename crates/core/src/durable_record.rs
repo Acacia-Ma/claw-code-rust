@@ -465,6 +465,12 @@ pub struct UsageRecordedRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InvocationId(pub uuid::Uuid);
 
+impl Default for InvocationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvocationId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
@@ -481,6 +487,12 @@ impl std::fmt::Display for InvocationId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModelBindingId(pub uuid::Uuid);
 
+impl Default for ModelBindingId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelBindingId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
@@ -496,6 +508,12 @@ impl std::fmt::Display for ModelBindingId {
 /// Identifies a provider instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProviderId(pub uuid::Uuid);
+
+impl Default for ProviderId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ProviderId {
     pub fn new() -> Self {
@@ -694,6 +712,12 @@ pub struct MessageEditRecordedRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditId(pub uuid::Uuid);
 
+impl Default for EditId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EditId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
@@ -732,6 +756,12 @@ pub struct TurnSupersededRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestoreId(pub uuid::Uuid);
+
+impl Default for RestoreId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl RestoreId {
     pub fn new() -> Self {
@@ -829,6 +859,12 @@ pub struct PlanUpdatedRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlanId(pub uuid::Uuid);
+
+impl Default for PlanId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PlanId {
     pub fn new() -> Self {
@@ -947,6 +983,12 @@ pub struct GoalClearedRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GoalId(pub uuid::Uuid);
+
+impl Default for GoalId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GoalId {
     pub fn new() -> Self {
@@ -1176,6 +1218,7 @@ pub enum ChangeSetStatus {
 }
 
 /// A single file change attributed to a tool call.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileChange {
     pub file_change_id: String,

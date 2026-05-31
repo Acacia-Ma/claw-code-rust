@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
+use devo_core::AppConfigStore;
+use devo_core::ProviderVendorCatalog;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 
@@ -68,6 +70,7 @@ pub struct ServerRuntimeDependencies {
     pub(crate) provider: Arc<dyn ModelProviderSDK>,
     /// TODO: the router method is, take the binding of model and provider, then decide which ModelProviderSdk to call. so, let's move this functionality to ModelProviderSdkRegistry, as a method.
     /// Provider router facade for model invocation dispatch.
+    #[allow(dead_code)]
     pub(crate) provider_router: Arc<dyn ProviderRouter>,
     /// Shared built-in tool registry used by turn execution.
     pub(crate) registry: Arc<ToolRegistry>,
@@ -78,6 +81,9 @@ pub struct ServerRuntimeDependencies {
     /// This is guaranteed by server bootstrap and used as the fallback model
     /// when session or turn metadata does not specify one.
     pub(crate) default_model: String,
+    /// ProviderVendor catalog used to resolve current provider.
+    #[allow(dead_code)]
+    pub(crate) provider_vendor_catalog: Arc<ProviderVendorCatalog>,
     /// Model catalog used to resolve builtin prompt metadata.
     pub(crate) model_catalog: Arc<dyn ModelCatalog>,
     /// Default workspace root used for workspace-scoped skill discovery.
@@ -88,10 +94,8 @@ pub struct ServerRuntimeDependencies {
     pub(crate) agents_md: AgentsMdConfig,
     /// SQLite database for session metadata, token stats, and pending queues.
     pub(crate) db: Arc<Database>,
-    /// TODO: Should be a configuration Object! The configuration object merges multiple
-    /// source of config file, such as gloal user path, and current workspace.
-    /// Path to user config.toml used for listing configured models.
-    pub(crate) config_file: PathBuf,
+    /// Shared app config loaded from user and optional workspace config files.
+    pub(crate) config_store: Arc<std::sync::Mutex<AppConfigStore>>,
 }
 
 impl ServerRuntimeDependencies {
@@ -104,11 +108,12 @@ impl ServerRuntimeDependencies {
         registry: Arc<ToolRegistry>,
         default_model: String,
         model_catalog: Arc<dyn ModelCatalog>,
+        provider_vendor_catalog: Arc<ProviderVendorCatalog>,
         skill_workspace_root: Option<PathBuf>,
         skill_catalog: Box<dyn SkillCatalog + Send>,
         agents_md: AgentsMdConfig,
         db: Arc<Database>,
-        config_file: PathBuf,
+        config_store: Arc<std::sync::Mutex<AppConfigStore>>,
     ) -> Self {
         Self {
             provider,
@@ -116,17 +121,18 @@ impl ServerRuntimeDependencies {
             registry,
             default_model,
             model_catalog,
+            provider_vendor_catalog,
             skill_workspace_root,
             skill_catalog: StdMutex::new(skill_catalog),
             agents_md,
             db,
-            config_file,
+            config_store,
         }
     }
 
     /// Creates an initial core session state for a newly created server session.
     pub(crate) fn new_session_state(&self, session_id: SessionId, cwd: PathBuf) -> SessionState {
-        /// TODO: Session config already has workspace cwd, I think the cwd at permission_profile preset is duplicated.
+        // TODO: Session config already has workspace cwd, I think the cwd at permission_profile preset is duplicated.
         let permission_profile = devo_safety::RuntimePermissionProfile::from_preset(
             devo_safety::PermissionPreset::Default,
             cwd.clone(),
