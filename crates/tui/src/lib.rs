@@ -33,6 +33,8 @@ pub mod markdown_render;
 mod markdown_stream;
 mod onboarding;
 mod onboarding_widget;
+#[cfg(test)]
+mod onboarding_widget_tests;
 mod pager_overlay;
 mod render;
 mod shimmer;

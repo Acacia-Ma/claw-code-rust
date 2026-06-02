@@ -42,6 +42,7 @@ struct PendingOnboarding {
     binding: OnboardingModelBinding,
     base_url: Option<String>,
     api_key: Option<String>,
+    provider_credential_id: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -51,6 +52,7 @@ struct OnboardingCommandPayload {
     display_name: String,
     provider_id: String,
     provider_name: String,
+    provider_credential_id: Option<String>,
     invocation_method: ProviderWireApi,
     default_reasoning_effort: Option<String>,
     base_url: Option<String>,
@@ -649,11 +651,14 @@ fn handle_worker_event(
         }
         WorkerEvent::ProviderValidationSucceeded { .. } => {
             if let Some(pending) = loop_state.pending_onboarding.as_ref() {
-                let provider_vendor = onboarding_provider_vendor(
+                let mut provider_vendor = onboarding_provider_vendor(
                     &pending.binding,
                     pending.base_url.as_deref(),
                     pending.api_key.as_deref(),
                 );
+                if pending.api_key.as_deref().is_none() {
+                    provider_vendor.credential = pending.provider_credential_id.clone();
+                }
                 let model_binding = onboarding_provider_model_binding(
                     &pending.binding,
                     pending.base_url.as_deref(),
@@ -862,11 +867,14 @@ fn handle_app_command(
                     default_reasoning_effort: payload.default_reasoning_effort,
                 };
                 worker.list_provider_vendors()?;
-                let provider_vendor = onboarding_provider_vendor(
+                let mut provider_vendor = onboarding_provider_vendor(
                     &binding,
                     payload.base_url.as_deref(),
                     payload.api_key.as_deref(),
                 );
+                if payload.api_key.as_deref().is_none() {
+                    provider_vendor.credential = payload.provider_credential_id.clone();
+                }
                 let model_binding =
                     onboarding_provider_model_binding(&binding, payload.base_url.as_deref());
                 worker.validate_provider(
@@ -878,6 +886,7 @@ fn handle_app_command(
                     binding,
                     base_url: payload.base_url,
                     api_key: payload.api_key,
+                    provider_credential_id: payload.provider_credential_id,
                 });
                 chat_widget.set_status_message("Validating provider");
             } else {

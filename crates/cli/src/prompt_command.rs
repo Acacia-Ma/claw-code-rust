@@ -44,9 +44,7 @@ pub(crate) async fn run_prompt(input: &str, log_level: Option<&str>) -> Result<(
     let registry = {
         let mcp_manager = std::sync::Arc::new(RmcpMcpManager::new(
             app_config.mcp.clone(),
-            app_config
-                .mcp_oauth_credentials_store
-                .unwrap_or_default(),
+            app_config.mcp_oauth_credentials_store.unwrap_or_default(),
         ));
         let reg =
             handlers::build_registry_from_plan_with_mcp(&ToolPlanConfig::default(), mcp_manager)

@@ -85,9 +85,7 @@ pub async fn run_server_process(args: ServerProcessArgs) -> Result<()> {
 
     let mcp_manager = Arc::new(RmcpMcpManager::new(
         config.mcp.clone(),
-        config
-            .mcp_oauth_credentials_store
-            .unwrap_or_default(),
+        config.mcp_oauth_credentials_store.unwrap_or_default(),
     ));
     let registry =
         handlers::build_registry_from_plan_with_mcp(&ToolPlanConfig::default(), mcp_manager).await;
