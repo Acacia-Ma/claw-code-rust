@@ -60,9 +60,10 @@ fn rendered_rows(widget: &OnboardingWidget, width: u16, height: u16) -> Vec<Stri
 
 fn next_shell_command(app_event_rx: &mut mpsc::UnboundedReceiver<AppEvent>) -> String {
     loop {
-        match app_event_rx.try_recv().expect("expected queued app event") {
-            AppEvent::Command(AppCommand::RunUserShellCommand { command }) => return command,
-            _ => {}
+        if let AppEvent::Command(AppCommand::RunUserShellCommand { command }) =
+            app_event_rx.try_recv().expect("expected queued app event")
+        {
+            return command;
         }
     }
 }

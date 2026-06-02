@@ -605,9 +605,16 @@ impl ChatWidget {
                 self.resume_browser_loading = false;
                 self.open_resume_browser(sessions);
             }
-            WorkerEvent::SkillsListed { body } => {
-                self.add_markdown_history("Skills", &body);
-                self.set_status_message("Skills loaded");
+            WorkerEvent::SkillsListed {
+                body,
+                skills,
+                show_in_transcript,
+            } => {
+                self.bottom_pane.set_skill_mentions(Some(skills));
+                if show_in_transcript {
+                    self.add_padded_markdown_history("Skills", &body);
+                    self.set_status_message("Skills loaded");
+                }
             }
             WorkerEvent::NewSessionPrepared {
                 cwd,

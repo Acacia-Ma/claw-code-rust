@@ -4,10 +4,14 @@
 use anyhow::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
+use devo_core::AppConfigLoader;
+use devo_core::FileSystemAppConfigLoader;
 use devo_protocol::Model;
 use devo_protocol::ModelCatalog;
 use devo_protocol::ProviderWireApi;
+use devo_utils::find_devo_home;
 use futures::StreamExt;
+use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -124,6 +128,7 @@ enum EscBacktrackAction {
 struct AppCommandContext<'a, M: ModelCatalog> {
     model_catalog: &'a M,
     default_provider: ProviderWireApi,
+    cwd: &'a Path,
     project_config_key: &'a str,
 }
 
@@ -289,6 +294,7 @@ pub async fn run_interactive_tui(config: InteractiveTuiConfig) -> Result<AppExit
                     &AppCommandContext {
                         model_catalog: &config.model_catalog,
                         default_provider: initial_session.provider,
+                        cwd: &cwd,
                         project_config_key: &project_config_key,
                     },
                 )? {
@@ -768,31 +774,13 @@ fn handle_app_command(
                 worker.set_model(model.clone())?;
             }
             worker.set_thinking(thinking.clone())?;
-            let prompt = input
-                .iter()
-                .filter_map(|item| match item {
-                    devo_protocol::InputItem::Text { text } => Some(text.as_str()),
-                    devo_protocol::InputItem::Skill { .. }
-                    | devo_protocol::InputItem::LocalImage { .. }
-                    | devo_protocol::InputItem::Mention { .. } => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            worker.submit_prompt(prompt, approval_policy.clone())?;
+            worker.submit_input(input.clone(), approval_policy.clone())?;
         }
         AppCommand::SteerTurn {
             input,
             expected_turn_id,
         } => {
-            let prompt = input
-                .iter()
-                .filter_map(|item| match item {
-                    devo_protocol::InputItem::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            worker.submit_steer(prompt, *expected_turn_id)?;
+            worker.submit_steer(input.clone(), *expected_turn_id)?;
         }
         AppCommand::ApprovalRespond {
             session_id,
@@ -842,6 +830,30 @@ fn handle_app_command(
                 chat_widget.set_status_message("Loading sessions");
             } else if command == "provider list" {
                 worker.list_provider_vendors()?;
+            } else if command == "skills list" {
+                worker.list_skills()?;
+                chat_widget.set_status_message("Loading skills");
+            } else if command == "mcp list" {
+                match find_devo_home()
+                    .map_err(anyhow::Error::from)
+                    .and_then(|config_home| {
+                        FileSystemAppConfigLoader::new(config_home)
+                            .load(Some(context.cwd))
+                            .map_err(anyhow::Error::from)
+                    }) {
+                    Ok(app_config) => {
+                        let body = crate::mcp_servers::render_mcp_servers_markdown(&app_config.mcp);
+                        chat_widget.add_padded_markdown_history("MCP Servers", &body);
+                        chat_widget.set_status_message("MCP servers loaded");
+                    }
+                    Err(error) => {
+                        chat_widget.add_to_history(crate::history_cell::new_error_event_with_hint(
+                            format!("Failed to load MCP server list: {error}"),
+                            Some("mcp list failed".to_string()),
+                        ));
+                        chat_widget.set_status_message("Failed to load MCP servers");
+                    }
+                }
             } else if command == "session new" {
                 worker.start_new_session()?;
             } else if let Some(payload) = parse_onboarding_command(command) {

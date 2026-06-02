@@ -29,7 +29,9 @@ impl ChatWidget {
             SlashCommand::Resume => "session",
             SlashCommand::Permissions => "permissions",
             SlashCommand::Diff => "diff",
-            SlashCommand::Goal
+            SlashCommand::Mcp
+            | SlashCommand::Skills
+            | SlashCommand::Goal
             | SlashCommand::Exit
             | SlashCommand::Status
             | SlashCommand::Clear
@@ -99,6 +101,20 @@ impl ChatWidget {
                 } else {
                     self.apply_model_selection(argument);
                 }
+            }
+            SlashCommand::Mcp => {
+                self.app_event_tx
+                    .send(AppEvent::Command(AppCommand::RunUserShellCommand {
+                        command: "mcp list".to_string(),
+                    }));
+                self.set_status_message("Loading MCP servers");
+            }
+            SlashCommand::Skills => {
+                self.app_event_tx
+                    .send(AppEvent::Command(AppCommand::RunUserShellCommand {
+                        command: "skills list".to_string(),
+                    }));
+                self.set_status_message("Loading skills");
             }
             SlashCommand::Compact => {
                 self.app_event_tx

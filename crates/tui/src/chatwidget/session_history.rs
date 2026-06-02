@@ -81,8 +81,20 @@ impl ChatWidget {
         self.frame_requester.schedule_frame();
     }
 
-    pub(super) fn add_markdown_history(&mut self, title: &str, body: &str) {
+    pub(crate) fn add_markdown_history(&mut self, title: &str, body: &str) {
         self.add_markdown_history_with_status(title, body, DotStatus::Completed);
+    }
+
+    pub(crate) fn add_padded_markdown_history(&mut self, title: &str, body: &str) {
+        let mut lines = vec![Line::from(title.to_string()).bold()];
+        append_markdown(
+            body,
+            /*width*/ None,
+            Some(&self.session.cwd),
+            &mut lines,
+        );
+        let lines = prefix_lines(lines, Span::raw("  "), Span::raw("  "));
+        self.add_to_history(PlainHistoryCell::new(lines));
     }
 
     pub(super) fn add_markdown_history_with_status(

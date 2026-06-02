@@ -3,6 +3,8 @@
 //! The host forwards TUI and app events to the chat widget; this module keeps
 //! those input transitions separate from transcript rendering and configuration.
 
+use std::path::Path;
+
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -67,13 +69,21 @@ impl ChatWidget {
                 local_images,
                 mention_bindings,
             } => {
-                if self.busy && !text.trim().is_empty() {
+                let user_message = UserMessage {
+                    text,
+                    local_images,
+                    remote_image_urls: Vec::new(),
+                    text_elements,
+                    mention_bindings,
+                };
+                if self.busy && !user_message.text.trim().is_empty() {
                     // Turn is active — show in bottom pane as pending cell.
-                    self.bottom_pane.push_pending_cell(text.clone());
+                    self.bottom_pane
+                        .push_pending_cell(user_message.text.clone());
                     self.queued_count += 1;
                     self.app_event_tx
                         .send(AppEvent::Command(AppCommand::user_turn(
-                            vec![devo_protocol::InputItem::Text { text }],
+                            input_items_for_user_message(&user_message),
                             Some(self.session.cwd.clone()),
                             self.session.model.as_ref().map(|m| m.slug.clone()),
                             self.thinking_selection.clone(),
@@ -82,13 +92,6 @@ impl ChatWidget {
                         )));
                     self.set_status_message("Message queued");
                 } else {
-                    let user_message = UserMessage {
-                        text,
-                        local_images,
-                        remote_image_urls: Vec::new(),
-                        text_elements,
-                        mention_bindings,
-                    };
                     self.submit_user_message(user_message);
                 }
             }
@@ -234,6 +237,7 @@ impl ChatWidget {
             .iter()
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
+        let input = input_items_for_user_message(&user_message);
         self.add_to_history(history_cell::new_user_prompt(
             user_message.text.clone(),
             user_message.text_elements.clone(),
@@ -244,9 +248,7 @@ impl ChatWidget {
 
         self.app_event_tx
             .send(AppEvent::Command(AppCommand::user_turn(
-                vec![InputItem::Text {
-                    text: user_message.text,
-                }],
+                input,
                 Some(self.session.cwd.clone()),
                 self.session.model.as_ref().map(|model| model.slug.clone()),
                 self.thinking_selection.clone(),
@@ -343,4 +345,40 @@ impl ChatWidget {
     pub(crate) fn is_onboarding_active(&self) -> bool {
         self.onboarding.is_some()
     }
+}
+
+fn input_items_for_user_message(user_message: &UserMessage) -> Vec<InputItem> {
+    let mut input = vec![InputItem::Text {
+        text: user_message.text.clone(),
+    }];
+
+    for binding in &user_message.mention_bindings {
+        let Some(name) = binding.mention.strip_prefix('$') else {
+            continue;
+        };
+        if !is_skill_binding_path(&binding.path) {
+            continue;
+        }
+        input.push(InputItem::Skill {
+            name: name.to_string(),
+            path: Path::new(&binding.path).to_path_buf(),
+        });
+    }
+
+    input.extend(
+        user_message
+            .local_images
+            .iter()
+            .map(|attachment| InputItem::LocalImage {
+                path: attachment.path.clone(),
+            }),
+    );
+    input
+}
+
+fn is_skill_binding_path(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
 }

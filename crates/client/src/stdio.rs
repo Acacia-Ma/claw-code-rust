@@ -49,6 +49,8 @@ use devo_protocol::SkillChangedParams;
 use devo_protocol::SkillChangedResult;
 use devo_protocol::SkillListParams;
 use devo_protocol::SkillListResult;
+use devo_protocol::SkillSetEnabledParams;
+use devo_protocol::SkillSetEnabledResult;
 use devo_protocol::SuccessResponse;
 use devo_protocol::TurnInterruptParams;
 use devo_protocol::TurnInterruptResult;
@@ -227,6 +229,13 @@ impl StdioServerClient {
         params: SkillChangedParams,
     ) -> Result<SkillChangedResult> {
         self.request("skills/changed", params).await
+    }
+
+    pub async fn skills_set_enabled(
+        &mut self,
+        params: SkillSetEnabledParams,
+    ) -> Result<SkillSetEnabledResult> {
+        self.request("skills/set_enabled", params).await
     }
 
     pub async fn model_catalog(
