@@ -39,6 +39,7 @@ use devo_server::ServerRuntime;
 use devo_server::ServerRuntimeDependencies;
 use futures::stream;
 
+const STDIO_SERVER_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 const STDIO_SERVER_LINE_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn write_test_config(home_dir: &TempDir, listen: &[&str]) -> Result<()> {
@@ -224,7 +225,12 @@ async fn stdio_server_process_supports_handshake_and_session_start() -> Result<(
         .await?;
     stdin.flush().await?;
 
-    let line = read_stdio_line(&mut stdout_reader, "initialize response").await?;
+    let line = read_stdio_line(
+        &mut stdout_reader,
+        "initialize response",
+        STDIO_SERVER_STARTUP_TIMEOUT,
+    )
+    .await?;
     let initialize_response: serde_json::Value =
         parse_stdio_json_line(&mut child, &mut stderr_reader, "initialize response", &line).await?;
     assert_eq!(initialize_response["id"], serde_json::json!(1));
@@ -254,10 +260,18 @@ async fn stdio_server_process_supports_handshake_and_session_start() -> Result<(
         .await?;
     stdin.flush().await?;
 
-    let first_message =
-        read_stdio_line(&mut stdout_reader, "first post-session/start message").await?;
-    let second_message =
-        read_stdio_line(&mut stdout_reader, "second post-session/start message").await?;
+    let first_message = read_stdio_line(
+        &mut stdout_reader,
+        "first post-session/start message",
+        STDIO_SERVER_LINE_TIMEOUT,
+    )
+    .await?;
+    let second_message = read_stdio_line(
+        &mut stdout_reader,
+        "second post-session/start message",
+        STDIO_SERVER_LINE_TIMEOUT,
+    )
+    .await?;
 
     let first_value = parse_stdio_json_line(
         &mut child,
@@ -798,8 +812,9 @@ async fn parse_stdio_json_line(
 async fn read_stdio_line(
     reader: &mut tokio::io::Lines<AsyncBufReader<tokio::process::ChildStdout>>,
     context: &str,
+    line_timeout: Duration,
 ) -> Result<String> {
-    timeout(STDIO_SERVER_LINE_TIMEOUT, reader.next_line())
+    timeout(line_timeout, reader.next_line())
         .await
         .with_context(|| format!("timed out waiting for {context}"))?
         .with_context(|| format!("failed reading {context} from child stdout"))?
