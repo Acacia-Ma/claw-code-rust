@@ -45,13 +45,23 @@ impl Default for SessionConfig {
 /// Per-turn execution settings resolved before the query loop starts.
 #[derive(Debug, Clone)]
 pub struct TurnConfig {
+    /// Catalog model keyed by `model_slug`; used for prompts, capabilities,
+    /// thinking metadata, context limits, session metadata, and UI state.
     pub model: Model,
+    /// Provider wire model name from the selected binding's `model_name`.
+    /// This is the string sent as `ModelRequest.model` for the base model.
     pub request_model: String,
+    /// Provider-scoped variant lookup used when thinking resolves to another
+    /// catalog slug before the request is built.
     pub provider_request_models: ProviderRequestModelMap,
     pub thinking_selection: Option<String>,
 }
 
 /// Provider request model names keyed by catalog model slug for one selected provider.
+///
+/// Example: the catalog slug `kimi-k2.5-thinking` can map to the provider wire
+/// name `moonshotai/kimi-k2.5-thinking`. The map is provider-scoped so a
+/// duplicate slug configured under another provider is ignored for this turn.
 #[derive(Debug, Clone, Default)]
 pub struct ProviderRequestModelMap {
     by_model_slug: HashMap<String, String>,
@@ -102,6 +112,9 @@ impl TurnConfig {
         if resolved_catalog_model == self.model.slug {
             return self.request_model.clone();
         }
+        // Thinking may resolve the catalog model to a variant slug. Keep catalog
+        // metadata from the variant, but translate the final request back to the
+        // selected provider's `model_name` when a matching binding exists.
         self.provider_request_models
             .get(resolved_catalog_model)
             .map(str::to_string)

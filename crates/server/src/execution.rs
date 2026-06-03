@@ -186,7 +186,6 @@ impl ServerRuntimeDependencies {
             })
     }
 
-    /// TODO: We don't need this, the model and reasonning effort(thinking) field are at session metadata.
     /// Resolves the full turn configuration used by the core query loop.
     pub(crate) fn resolve_turn_config(
         &self,
@@ -202,6 +201,10 @@ impl ServerRuntimeDependencies {
             .clone();
 
         if let Some(binding) = resolve_enabled_model_binding(&provider_config, requested_model) {
+            // Variant request models are scoped to the selected provider. If
+            // both OpenRouter and a custom provider configure
+            // `model_slug = "kimi-k2.5-thinking"`, a turn selected through
+            // OpenRouter must use OpenRouter's `model_name`.
             let provider_request_models = ProviderRequestModelMap::new(
                 provider_request_model_map_for_binding(&provider_config, &binding),
             );

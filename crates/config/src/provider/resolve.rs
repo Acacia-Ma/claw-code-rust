@@ -148,6 +148,9 @@ pub fn resolve_model_binding(
     config: &ProviderConfigSection,
     requested_model: Option<&str>,
 ) -> Option<ResolvedModelBinding> {
+    // This resolver is used for configuration validation. It intentionally keeps
+    // a configured-but-disabled binding visible so the caller can report
+    // "binding is disabled" instead of silently selecting another model.
     if let Some(requested_model) = requested_model {
         return config
             .model_bindings
@@ -189,6 +192,9 @@ pub fn resolve_enabled_model_binding(
     config: &ProviderConfigSection,
     requested_model: Option<&str>,
 ) -> Option<ResolvedModelBinding> {
+    // Runtime turn selection only uses enabled bindings. A user-facing model
+    // override may name either the local catalog slug or the provider wire name:
+    // e.g. `deepseek-v4-pro` or `deepseek/deepseek-v4-pro`.
     if let Some(requested_model) = requested_model {
         return config
             .model_bindings
@@ -225,6 +231,11 @@ pub fn provider_request_model_map_for_binding(
     config: &ProviderConfigSection,
     binding: &ResolvedModelBinding,
 ) -> std::collections::HashMap<String, String> {
+    // Thinking model variants are catalog slugs first. When `kimi-k2.5` resolves
+    // to variant slug `kimi-k2.5-thinking`, the provider request must use the
+    // matching binding's `model_name`, such as `moonshotai/kimi-k2.5-thinking`.
+    // Scope this map to the selected provider so another provider with the same
+    // variant slug cannot hijack the wire model name.
     config
         .model_bindings
         .values()

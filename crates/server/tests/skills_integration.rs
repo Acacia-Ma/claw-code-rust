@@ -122,6 +122,10 @@ fn canonical_skill_base_dir(path: &Path) -> PathBuf {
         .to_path_buf()
 }
 
+fn skill_description(path: &Path) -> String {
+    format!("Skill discovered at {}", path.display())
+}
+
 fn build_runtime(
     data_root: &Path,
     user_skill_root: PathBuf,
@@ -663,7 +667,7 @@ async fn skills_list_returns_user_and_workspace_skills() -> Result<()> {
                 SkillRecord {
                     id: "team-style".into(),
                     name: "team-style".into(),
-                    description: format!("Skill discovered at {}", team_skill_path.display()),
+                    description: skill_description(&canonical_team_skill_path),
                     short_description: None,
                     interface: None,
                     dependencies: None,
@@ -678,7 +682,7 @@ async fn skills_list_returns_user_and_workspace_skills() -> Result<()> {
                 SkillRecord {
                     id: "rust-docs".into(),
                     name: "rust-docs".into(),
-                    description: format!("Skill discovered at {}", rust_skill_path.display()),
+                    description: skill_description(&canonical_rust_skill_path),
                     short_description: None,
                     interface: None,
                     dependencies: None,
@@ -732,7 +736,7 @@ async fn skills_changed_rediscovers_new_workspace_skill() -> Result<()> {
             skills: vec![SkillRecord {
                 id: "alpha".into(),
                 name: "alpha".into(),
-                description: format!("Skill discovered at {}", alpha_skill_path.display()),
+                description: skill_description(&canonical_alpha_skill_path),
                 short_description: None,
                 interface: None,
                 dependencies: None,
@@ -771,7 +775,7 @@ async fn skills_changed_rediscovers_new_workspace_skill() -> Result<()> {
                 SkillRecord {
                     id: "alpha".into(),
                     name: "alpha".into(),
-                    description: format!("Skill discovered at {}", alpha_skill_path.display()),
+                    description: skill_description(&canonical_alpha_skill_path),
                     short_description: None,
                     interface: None,
                     dependencies: None,
@@ -786,7 +790,7 @@ async fn skills_changed_rediscovers_new_workspace_skill() -> Result<()> {
                 SkillRecord {
                     id: "bravo".into(),
                     name: "bravo".into(),
-                    description: format!("Skill discovered at {}", bravo_skill_path.display()),
+                    description: skill_description(&canonical_bravo_skill_path),
                     short_description: None,
                     interface: None,
                     dependencies: None,

@@ -703,6 +703,9 @@ impl ServerRuntime {
                         .model
                         .clone()
                         .unwrap_or_else(|| self.deps.default_model.clone());
+                    // Synthetic fork metadata follows normal turn semantics:
+                    // `model` remains the catalog slug, while `request_model`
+                    // is recomputed from the active provider binding.
                     let request_model = self
                         .deps
                         .resolve_turn_config(Some(&model), source.summary.thinking.clone())
