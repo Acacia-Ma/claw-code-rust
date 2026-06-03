@@ -51,8 +51,10 @@ jobs:
         if: runner.os == 'Linux'
 
       - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
         if: runner.os == 'Linux'
-        run: cargo install cargo-zigbuild --version 0.22.3 --locked
+        with:
+          tool: cargo-zigbuild@0.22.3
 
       - name: Build release binary (x86_64 Linux)
         if: matrix.target == 'x86_64-unknown-linux-musl'
