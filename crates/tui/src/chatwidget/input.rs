@@ -85,7 +85,7 @@ impl ChatWidget {
                         .send(AppEvent::Command(AppCommand::user_turn(
                             input_items_for_user_message(&user_message),
                             Some(self.session.cwd.clone()),
-                            self.session.model.as_ref().map(|m| m.slug.clone()),
+                            self.user_turn_model(),
                             self.thinking_selection.clone(),
                             /*sandbox*/ None,
                             Some("on-request".to_string()),
@@ -255,7 +255,7 @@ impl ChatWidget {
             .send(AppEvent::Command(AppCommand::user_turn(
                 input,
                 Some(self.session.cwd.clone()),
-                self.session.model.as_ref().map(|model| model.slug.clone()),
+                self.user_turn_model(),
                 self.thinking_selection.clone(),
                 /*sandbox*/ None,
                 Some("on-request".to_string()),
@@ -267,12 +267,27 @@ impl ChatWidget {
         match result {
             OnboardingResult::ValidationSucceeded {
                 model_slug,
-                model_name: _,
+                model_name,
+                display_name,
             } => {
-                self.update_session_request_model(model_slug);
+                self.apply_session_model_name(model_slug, model_name, display_name);
                 self.add_to_history(history_cell::new_info_event(
                     "Provider configured successfully".to_string(),
                     Some("onboarding complete".to_string()),
+                ));
+                self.onboarding = None;
+                self.set_default_placeholder();
+                self.set_status_message("Onboarding complete");
+            }
+            OnboardingResult::ValidationBypassed {
+                model_slug,
+                model_name,
+                display_name,
+            } => {
+                self.apply_session_model_name(model_slug, model_name, display_name);
+                self.add_to_history(history_cell::new_info_event(
+                    "Provider added without validation".to_string(),
+                    Some("onboarding validation skipped".to_string()),
                 ));
                 self.onboarding = None;
                 self.set_default_placeholder();

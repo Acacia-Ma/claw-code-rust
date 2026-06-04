@@ -737,28 +737,17 @@ async fn run_worker_inner(
                             Ok(Ok(result)) => {
                                 let _ = event_tx.send(WorkerEvent::ProviderVendorUpserted {
                                     provider_vendor: result.provider_vendor,
+                                    model_binding: result.model_binding,
                                 });
                             }
                             Ok(Err(error)) => {
-                                let _ = event_tx.send(WorkerEvent::TurnFailed {
+                                let _ = event_tx.send(WorkerEvent::ProviderVendorUpsertFailed {
                                     message: error.to_string(),
-                                    turn_count,
-                                    total_input_tokens,
-                                    total_output_tokens,
-                                    total_cache_read_tokens,
-                                    prompt_token_estimate: total_input_tokens,
-                                    last_query_input_tokens,
                                 });
                             }
                             Err(_) => {
-                                let _ = event_tx.send(WorkerEvent::TurnFailed {
+                                let _ = event_tx.send(WorkerEvent::ProviderVendorUpsertFailed {
                                     message: "provider upsert request timed out".to_string(),
-                                    turn_count,
-                                    total_input_tokens,
-                                    total_output_tokens,
-                                    total_cache_read_tokens,
-                                    prompt_token_estimate: total_input_tokens,
-                                    last_query_input_tokens,
                                 });
                             }
                         }

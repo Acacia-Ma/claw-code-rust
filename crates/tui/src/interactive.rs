@@ -64,9 +64,27 @@ struct OnboardingCommandPayload {
     api_key: Option<String>,
 }
 
-fn parse_onboarding_command(command: &str) -> Option<OnboardingCommandPayload> {
-    let payload = command.strip_prefix("onboard ")?;
-    serde_json::from_str(payload).ok()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnboardingCommandAction {
+    Validate,
+    SkipValidation,
+}
+
+fn parse_onboarding_command(
+    command: &str,
+) -> Option<(OnboardingCommandAction, OnboardingCommandPayload)> {
+    let (action, payload) = if let Some(payload) = command.strip_prefix("onboard-skip-validation ")
+    {
+        (OnboardingCommandAction::SkipValidation, payload)
+    } else {
+        (
+            OnboardingCommandAction::Validate,
+            command.strip_prefix("onboard ")?,
+        )
+    };
+    serde_json::from_str(payload)
+        .ok()
+        .map(|payload| (action, payload))
 }
 
 fn normalized_display_name(
@@ -233,6 +251,16 @@ pub async fn run_interactive_tui(config: InteractiveTuiConfig) -> Result<AppExit
     let project_config_key = devo_core::project_config_key(&cwd);
 
     let model = resolve_initial_model(&initial_session, &config.model_catalog);
+    let request_model = initial_session
+        .request_model
+        .clone()
+        .and_then(|request_model| {
+            if request_model == model.slug {
+                None
+            } else {
+                Some(request_model)
+            }
+        });
     let initial_provider = model.provider_wire_api();
     let initial_reasoning_effort = model
         .resolve_thinking_selection(initial_session.thinking_selection.as_deref())
@@ -249,6 +277,7 @@ pub async fn run_interactive_tui(config: InteractiveTuiConfig) -> Result<AppExit
         initial_session: TuiSessionState {
             cwd: cwd.clone(),
             model: Some(model),
+            request_model,
             provider: Some(initial_provider),
             reasoning_effort: initial_reasoning_effort,
         },
@@ -713,17 +742,22 @@ fn handle_worker_event(
                 )?;
             }
         }
-        WorkerEvent::ProviderVendorUpserted { .. } => {
+        WorkerEvent::ProviderVendorUpserted { model_binding, .. } => {
             if let Some(pending) = loop_state.pending_onboarding.take() {
+                let model_name = model_binding
+                    .as_ref()
+                    .map(|binding| binding.model_name.clone())
+                    .unwrap_or_else(|| pending.binding.model_name.clone());
                 worker.reconfigure_provider(
                     pending.binding.invocation_method,
-                    pending.binding.model_name,
+                    model_name,
                     pending.base_url,
                     pending.api_key,
                 )?;
             }
         }
-        WorkerEvent::ProviderValidationFailed { .. } => {
+        WorkerEvent::ProviderValidationFailed { .. }
+        | WorkerEvent::ProviderVendorUpsertFailed { .. } => {
             loop_state.pending_onboarding = None;
         }
         WorkerEvent::SessionCompactionStarted => {
@@ -894,7 +928,7 @@ fn handle_app_command(
                 }
             } else if command == "session new" {
                 worker.start_new_session()?;
-            } else if let Some(payload) = parse_onboarding_command(command) {
+            } else if let Some((onboarding_action, payload)) = parse_onboarding_command(command) {
                 if context.model_catalog.get(&payload.model_slug).is_none() {
                     chat_widget.set_status_message(format!(
                         "Unsupported model slug: {}",
@@ -907,6 +941,9 @@ fn handle_app_command(
                     &payload.model_slug,
                     &payload.display_name,
                 );
+                let base_url = payload.base_url;
+                let api_key = payload.api_key;
+                let provider_credential_id = payload.provider_credential_id;
                 let binding = OnboardingModelBinding {
                     model_slug: payload.model_slug,
                     model_name: payload.model_name,
@@ -917,28 +954,41 @@ fn handle_app_command(
                     default_reasoning_effort: payload.default_reasoning_effort,
                 };
                 worker.list_provider_vendors()?;
-                let mut provider_vendor = onboarding_provider_vendor(
-                    &binding,
-                    payload.base_url.as_deref(),
-                    payload.api_key.as_deref(),
-                );
-                if payload.api_key.as_deref().is_none() {
-                    provider_vendor.credential = payload.provider_credential_id.clone();
+                let mut provider_vendor =
+                    onboarding_provider_vendor(&binding, base_url.as_deref(), api_key.as_deref());
+                if api_key.as_deref().is_none() {
+                    provider_vendor.credential = provider_credential_id.clone();
                 }
                 let model_binding =
-                    onboarding_provider_model_binding(&binding, payload.base_url.as_deref());
-                worker.validate_provider(
-                    provider_vendor,
-                    model_binding,
-                    payload.api_key.clone(),
-                )?;
-                loop_state.pending_onboarding = Some(PendingOnboarding {
+                    onboarding_provider_model_binding(&binding, base_url.as_deref());
+                let pending = PendingOnboarding {
                     binding,
-                    base_url: payload.base_url,
-                    api_key: payload.api_key,
-                    provider_credential_id: payload.provider_credential_id,
-                });
-                chat_widget.set_status_message("Validating provider");
+                    base_url,
+                    api_key,
+                    provider_credential_id,
+                };
+                match onboarding_action {
+                    OnboardingCommandAction::Validate => {
+                        worker.validate_provider(
+                            provider_vendor,
+                            model_binding,
+                            pending.api_key.clone(),
+                        )?;
+                        loop_state.pending_onboarding = Some(pending);
+                        chat_widget.set_status_message("Validating provider");
+                    }
+                    OnboardingCommandAction::SkipValidation => {
+                        let default_model_binding = Some(model_binding.binding_id.clone());
+                        worker.upsert_provider_vendor(
+                            provider_vendor,
+                            Some(model_binding),
+                            default_model_binding,
+                            pending.api_key.clone(),
+                        )?;
+                        loop_state.pending_onboarding = Some(pending);
+                        chat_widget.set_status_message("Adding provider without validation");
+                    }
+                }
             } else {
                 chat_widget.set_status_message(format!("Unsupported command: {}", command));
             }

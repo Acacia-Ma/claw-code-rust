@@ -256,6 +256,73 @@ fn provider_upsert_writes_user_config_when_workspace_is_active() {
 }
 
 #[test]
+fn provider_upsert_updates_existing_binding_model_name() {
+    let root = unique_temp_dir("provider-upsert-existing-binding");
+    let home = root.join("home").join(".devo");
+    std::fs::create_dir_all(&home).expect("home config dir");
+    std::fs::write(
+        home.join("config.toml"),
+        r#"
+[defaults]
+model_binding = "deepseek-v4-flash-deepseek"
+
+[providers.Deepseek]
+base_url = "https://api.deepseek.com"
+credential = "deepseek_api_key"
+enabled = true
+name = "Deepseek"
+wire_apis = ["openai_chat_completions"]
+
+[model_bindings.deepseek-v4-flash-deepseek]
+display_name = "deepseek-v4-flash"
+enabled = true
+invocation_method = "openai_chat_completions"
+model_name = "deepseek-v4-flash"
+model_slug = "deepseek-v4-flash"
+provider = "Deepseek"
+"#,
+    )
+    .expect("write user config");
+
+    let mut store =
+        AppConfigStore::load(home.clone(), /*workspace_root*/ None).expect("load store");
+    store
+        .upsert_provider_vendor(
+            "Deepseek".to_string(),
+            ProviderVendor {
+                name: "Deepseek".to_string(),
+                base_url: Some("https://api.deepseek.com".to_string()),
+                credential: Some("deepseek_api_key".to_string()),
+                wire_apis: vec![ProviderWireApi::OpenAIChatCompletions],
+                enabled: true,
+            },
+            Some(ProviderModelBinding {
+                binding_id: "deepseek-v4-flash-deepseek".to_string(),
+                model_slug: "deepseek-v4-flash".to_string(),
+                provider: "Deepseek".to_string(),
+                model_name: "DeepSeek-V4-Flash".to_string(),
+                display_name: Some("DeepSeek-V4-Flash".to_string()),
+                invocation_method: ProviderWireApi::OpenAIChatCompletions,
+                default_reasoning_effort: None,
+                enabled: true,
+            }),
+            Some("deepseek-v4-flash-deepseek".to_string()),
+            /*api_key*/ None,
+        )
+        .expect("upsert provider");
+
+    let user_config = std::fs::read_to_string(home.join("config.toml")).expect("user config");
+    let document: toml::Value = toml::from_str(&user_config).expect("parse user config");
+    let binding = &document["model_bindings"]["deepseek-v4-flash-deepseek"];
+
+    assert_eq!(binding["model_slug"].as_str(), Some("deepseek-v4-flash"));
+    assert_eq!(binding["model_name"].as_str(), Some("DeepSeek-V4-Flash"));
+    assert_eq!(binding["display_name"].as_str(), Some("DeepSeek-V4-Flash"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn loader_rejects_invalid_logging_file_prefix() {
     let root = unique_temp_dir("config-validation");
     let home = root.join("home").join(".devo");

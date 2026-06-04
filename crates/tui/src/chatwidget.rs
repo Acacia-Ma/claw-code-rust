@@ -102,6 +102,7 @@ pub(crate) struct ChatWidgetInit {
 pub(crate) struct TuiSessionState {
     pub(crate) cwd: PathBuf,
     pub(crate) model: Option<Model>,
+    pub(crate) request_model: Option<String>,
     pub(crate) provider: Option<ProviderWireApi>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
@@ -112,6 +113,7 @@ impl TuiSessionState {
         Self {
             cwd,
             model,
+            request_model: None,
             provider,
             reasoning_effort: None,
         }

@@ -40,7 +40,7 @@ impl ChatWidget {
             } => {
                 self.active_turn_id = Some(turn_id);
                 self.committed_server_assistant_in_turn = false;
-                self.update_session_request_model(model);
+                self.sync_session_catalog_model(model);
                 self.thinking_selection = thinking;
                 self.session.reasoning_effort = reasoning_effort;
                 self.refresh_header_box();
@@ -569,16 +569,13 @@ impl ChatWidget {
             WorkerEvent::ProviderValidationSucceeded { reply_preview } => {
                 if let Some(onboarding) = self.onboarding.as_mut() {
                     onboarding.on_validation_succeeded(reply_preview.clone());
-                    if let Some(result) = onboarding.take_result() {
-                        self.handle_onboarding_result(result);
-                    }
                 }
                 self.add_to_history(history_cell::new_info_event(
                     format!("Validation reply: {reply_preview}"),
                     Some("provider validation succeeded".to_string()),
                 ));
                 self.busy = false;
-                self.set_status_message("Onboarding complete");
+                self.set_status_message("Saving provider");
             }
             WorkerEvent::ProviderValidationFailed { message } => {
                 if let Some(onboarding) = self.onboarding.as_mut() {
@@ -596,11 +593,34 @@ impl ChatWidget {
                     onboarding.on_provider_vendors_listed(provider_vendors);
                 }
             }
-            WorkerEvent::ProviderVendorUpserted { provider_vendor } => {
+            WorkerEvent::ProviderVendorUpserted {
+                provider_vendor,
+                model_binding,
+            } => {
+                if let Some(binding) = model_binding.as_ref() {
+                    self.apply_session_model_binding(binding);
+                }
+                if let Some(onboarding) = self.onboarding.as_mut() {
+                    onboarding.on_provider_saved(model_binding.as_ref());
+                    if let Some(result) = onboarding.take_result() {
+                        self.handle_onboarding_result(result);
+                    }
+                }
                 self.add_to_history(history_cell::new_info_event(
                     format!("Provider saved: {}", provider_vendor.name),
                     Some("provider upserted".to_string()),
                 ));
+            }
+            WorkerEvent::ProviderVendorUpsertFailed { message } => {
+                if let Some(onboarding) = self.onboarding.as_mut() {
+                    onboarding.on_provider_save_failed(message.clone());
+                }
+                self.busy = false;
+                self.add_to_history(history_cell::new_error_event_with_hint(
+                    message,
+                    Some("provider upsert failed".to_string()),
+                ));
+                self.set_status_message("Provider save failed");
             }
             WorkerEvent::SessionsListed { sessions } => {
                 self.resume_browser_loading = false;

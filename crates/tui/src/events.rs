@@ -6,6 +6,7 @@ use crate::app_command::InputHistoryDirection;
 use crate::bottom_pane::SkillMetadata;
 use devo_core::ItemId;
 use devo_core::SessionId;
+use devo_protocol::ProviderModelBinding;
 use devo_protocol::ProviderVendor;
 use devo_protocol::ProviderWireApi;
 use devo_protocol::ReasoningEffort;
@@ -236,6 +237,13 @@ pub(crate) enum WorkerEvent {
     ProviderVendorUpserted {
         /// The provider vendor returned by `provider/upsert`.
         provider_vendor: ProviderVendor,
+        /// Optional model binding returned by `provider/upsert`.
+        model_binding: Option<ProviderModelBinding>,
+    },
+    /// Provider vendor upsert failed during onboarding or provider updates.
+    ProviderVendorUpsertFailed {
+        /// Human-readable failure reason from `provider/upsert`.
+        message: String,
     },
     /// Current known sessions were listed from the server.
     SessionsListed {

@@ -245,9 +245,9 @@ impl ChatWidget {
     pub(super) fn session_summary_text(&self) -> String {
         let model = self
             .session
-            .model
-            .as_ref()
-            .map(|model| model.slug.as_str())
+            .request_model
+            .as_deref()
+            .or_else(|| self.session.model.as_ref().map(|model| model.slug.as_str()))
             .unwrap_or("unknown");
         let thinking = self.thinking_selection.as_deref().unwrap_or("default");
         let cached_input_percent =
@@ -282,6 +282,19 @@ impl ChatWidget {
             parts.push(context);
         }
         parts.join("  ")
+    }
+
+    pub(super) fn model_display_name(&self) -> &str {
+        self.session
+            .request_model
+            .as_deref()
+            .or_else(|| {
+                self.session
+                    .model
+                    .as_ref()
+                    .map(|model| model.display_name.as_str())
+            })
+            .unwrap_or("unknown")
     }
 
     pub(super) fn sync_bottom_pane_summary(&mut self) {

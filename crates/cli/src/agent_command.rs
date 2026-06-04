@@ -8,6 +8,7 @@ use devo_core::PresetModelCatalog;
 use devo_core::ResolvedProviderSettings;
 use devo_core::SessionId;
 use devo_core::project_config_key;
+use devo_core::resolve_model_binding;
 use devo_protocol::PermissionPreset;
 use devo_protocol::ProviderWireApi;
 use devo_tui::InitialTuiSession;
@@ -57,6 +58,21 @@ pub(crate) async fn run_agent(
         model_thinking_selection,
         ..
     } = resolved;
+    let active_model_binding = if onboarding_mode {
+        None
+    } else {
+        resolve_model_binding(&app_config.provider, /*requested_model*/ None)
+    };
+    let request_model = active_model_binding.as_ref().and_then(|binding| {
+        if binding.model_name == binding.model_slug {
+            None
+        } else {
+            Some(binding.model_name.clone())
+        }
+    });
+    let model = active_model_binding
+        .map(|binding| binding.model_slug)
+        .unwrap_or(model);
 
     tracing::info!("starting interactive tui");
     let exit = run_interactive_tui(InteractiveTuiConfig {
@@ -64,6 +80,7 @@ pub(crate) async fn run_agent(
         initial_session: InitialTuiSession {
             session_id: initial_session_id,
             model,
+            request_model,
             provider: wire_api,
             thinking_selection: model_thinking_selection,
             permission_preset,

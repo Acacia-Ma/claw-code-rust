@@ -10,6 +10,9 @@ use devo_protocol::InputItem;
 use devo_protocol::ItemId;
 use devo_protocol::Model;
 use devo_protocol::PermissionPreset;
+use devo_protocol::ProviderModelBinding;
+use devo_protocol::ProviderVendor;
+use devo_protocol::ProviderWireApi;
 use devo_protocol::ReasoningEffort;
 use devo_protocol::SessionId;
 use devo_protocol::ThinkingCapability;
@@ -85,6 +88,29 @@ fn onboarding_widget_with_model(
     (widget, app_event_rx)
 }
 
+fn onboarding_widget_with_available_model(
+    model: Model,
+    cwd: PathBuf,
+) -> (ChatWidget, mpsc::UnboundedReceiver<AppEvent>) {
+    let (app_event_tx, app_event_rx) = mpsc::unbounded_channel();
+    let widget = ChatWidget::new_with_app_event(ChatWidgetInit {
+        frame_requester: FrameRequester::test_dummy(),
+        app_event_tx: AppEventSender::new(app_event_tx),
+        initial_session: TuiSessionState::new(cwd, Some(model.clone())),
+        initial_thinking_selection: None,
+        initial_permission_preset: devo_protocol::PermissionPreset::Default,
+        initial_user_message: None,
+        enhanced_keys_supported: true,
+        is_first_run: false,
+        available_models: vec![model],
+        saved_model_slugs: Vec::new(),
+        show_model_onboarding: true,
+        startup_tooltip_override: None,
+        initial_theme_name: None,
+    });
+    (widget, app_event_rx)
+}
+
 fn rendered_rows(widget: &ChatWidget, width: u16, height: u16) -> Vec<String> {
     let area = ratatui::layout::Rect::new(0, 0, width, height);
     let mut buf = ratatui::buffer::Buffer::empty(area);
@@ -96,6 +122,15 @@ fn rendered_rows(widget: &ChatWidget, width: u16, height: u16) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+fn press_key(code: KeyCode) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: crossterm::event::KeyEventState::NONE,
+    }
 }
 
 fn scrollback_contains_text(lines: &[crate::history_cell::ScrollbackLine], text: &str) -> bool {
@@ -1797,22 +1832,68 @@ fn onboarding_view_is_active_on_first_run() {
 }
 
 #[test]
-fn onboarding_validation_succeeded_clears_active_state() {
+fn onboarding_validation_succeeded_waits_for_provider_upsert() {
     let cwd = std::env::current_dir().expect("current directory is available");
     let model = Model {
-        slug: "anthropic-messages-model".to_string(),
-        display_name: "Test Model".to_string(),
+        slug: "deepseek-v4-flash".to_string(),
+        display_name: "Deepseek V4 Flash".to_string(),
         ..Model::default()
     };
-    let (mut widget, _app_event_rx) = onboarding_widget_with_model(model, cwd);
+    let (mut widget, mut app_event_rx) = onboarding_widget_with_available_model(model, cwd);
 
-    // Simulate validation success from the worker.
+    let _ = app_event_rx.try_recv().expect("provider list command");
+    widget.handle_worker_event(crate::events::WorkerEvent::ProviderVendorsListed {
+        provider_vendors: vec![ProviderVendor {
+            name: "Deepseek".to_string(),
+            base_url: Some("https://api.deepseek.com".to_string()),
+            credential: Some("deepseek_api_key".to_string()),
+            wire_apis: vec![ProviderWireApi::OpenAIChatCompletions],
+            enabled: true,
+        }],
+    });
+    widget.handle_key_event(press_key(KeyCode::Enter));
+    widget.handle_key_event(press_key(KeyCode::Enter));
+    widget.handle_key_event(press_key(KeyCode::Enter));
+    widget.handle_key_event(press_key(KeyCode::Enter));
+    widget.handle_key_event(press_key(KeyCode::Enter));
+    let _ = app_event_rx.try_recv().expect("onboard command");
+
     widget.handle_worker_event(crate::events::WorkerEvent::ProviderValidationSucceeded {
         reply_preview: "OK".to_string(),
     });
 
-    // After validation, onboarding should be cleared and placeholder reset.
+    assert_eq!(widget.is_onboarding_active(), true);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::ProviderVendorUpserted {
+        provider_vendor: ProviderVendor {
+            name: "Deepseek".to_string(),
+            base_url: Some("https://api.deepseek.com".to_string()),
+            credential: Some("deepseek_api_key".to_string()),
+            wire_apis: vec![ProviderWireApi::OpenAIChatCompletions],
+            enabled: true,
+        },
+        model_binding: Some(ProviderModelBinding {
+            binding_id: "deepseek-v4-flash-deepseek".to_string(),
+            model_slug: "deepseek-v4-flash".to_string(),
+            provider: "Deepseek".to_string(),
+            model_name: "DeepSeek-V4-Flash".to_string(),
+            display_name: Some("DeepSeek-V4-Flash".to_string()),
+            invocation_method: ProviderWireApi::OpenAIChatCompletions,
+            default_reasoning_effort: None,
+            enabled: true,
+        }),
+    });
+
+    assert_eq!(widget.is_onboarding_active(), false);
     assert_eq!(widget.placeholder_text(), "Ask Devo");
+    assert_eq!(
+        widget.current_model().map(|model| model.slug.as_str()),
+        Some("deepseek-v4-flash")
+    );
+    assert_eq!(
+        widget.status_summary_text().contains("DeepSeek-V4-Flash"),
+        true
+    );
 }
 
 #[test]

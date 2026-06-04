@@ -4,6 +4,7 @@
 //! changes stay separate from transcript and input handling.
 
 use devo_protocol::Model;
+use devo_protocol::ProviderModelBinding;
 use devo_protocol::ProviderWireApi;
 use devo_protocol::ReasoningEffort;
 use devo_protocol::ReasoningEffortPreset;
@@ -35,11 +36,17 @@ impl ChatWidget {
             .effective_reasoning_effort;
         self.session.provider = Some(model.provider_wire_api());
         self.session.model = Some(model);
+        self.session.request_model = None;
         self.set_default_placeholder();
         self.frame_requester.schedule_frame();
     }
 
     pub(super) fn update_session_request_model(&mut self, slug: String) {
+        self.session.request_model = None;
+        self.sync_session_catalog_model(slug);
+    }
+
+    pub(super) fn sync_session_catalog_model(&mut self, slug: String) {
         if let Some(model) = self
             .available_models
             .iter()
@@ -78,6 +85,47 @@ impl ChatWidget {
             .as_ref()
             .map(|model| model.resolve_thinking_selection(self.thinking_selection.as_deref()))
             .and_then(|resolved| resolved.effective_reasoning_effort);
+    }
+
+    pub(super) fn apply_session_model_name(
+        &mut self,
+        model_slug: String,
+        model_name: String,
+        display_name: String,
+    ) {
+        self.sync_session_catalog_model(model_slug.clone());
+        self.session.request_model = if model_name == model_slug {
+            None
+        } else {
+            Some(model_name)
+        };
+        let display_name = display_name.trim();
+        if !display_name.is_empty()
+            && let Some(model) = self.session.model.as_mut()
+        {
+            model.display_name = display_name.to_string();
+        }
+        self.refresh_header_box();
+        self.sync_bottom_pane_summary();
+        self.frame_requester.schedule_frame();
+    }
+
+    pub(super) fn apply_session_model_binding(&mut self, binding: &ProviderModelBinding) {
+        self.apply_session_model_name(
+            binding.model_slug.clone(),
+            binding.model_name.clone(),
+            binding
+                .display_name
+                .clone()
+                .unwrap_or_else(|| binding.model_name.clone()),
+        );
+    }
+
+    pub(super) fn user_turn_model(&self) -> Option<String> {
+        self.session
+            .request_model
+            .clone()
+            .or_else(|| self.session.model.as_ref().map(|model| model.slug.clone()))
     }
 
     pub(crate) fn set_thinking_selection(&mut self, selection: Option<String>) {
@@ -258,6 +306,7 @@ impl ChatWidget {
         });
         self.session.provider = Some(selected_model.provider);
         self.session.model = Some(selected_model.clone());
+        self.session.request_model = None;
         self.thinking_selection = thinking_selection;
         self.refresh_header_box();
 
@@ -339,6 +388,7 @@ impl ChatWidget {
             self.thinking_selection = selected_model.default_thinking_selection();
             self.session.provider = Some(selected_model.provider);
             self.session.model = Some(selected_model.clone());
+            self.session.request_model = None;
             self.app_event_tx
                 .send(AppEvent::Command(AppCommand::override_turn_context(
                     /*cwd*/ None,
