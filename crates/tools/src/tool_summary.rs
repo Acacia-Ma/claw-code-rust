@@ -100,11 +100,11 @@ pub fn tool_summary(name: &str, input: &serde_json::Value, cwd: &Path) -> String
                 }
             }
         }
-        "glob" => {
+        "find" | "glob" => {
             let pattern = input["pattern"].as_str().unwrap_or("");
             let path = input["path"].as_str().unwrap_or(".");
             let rel = make_relative(cwd, path);
-            format!("glob: {pattern} in {rel}")
+            format!("{name}: {pattern} in {rel}")
         }
         "apply_patch" => "apply_patch".to_string(),
         "webfetch" => {
@@ -239,6 +239,13 @@ mod tests {
         });
         let s = tool_summary("code_search", &input, &cwd());
         assert_eq!(s, "code_search related src/lib.rs:42");
+    }
+
+    #[test]
+    fn find_summary() {
+        let input = json!({"pattern": "**/*.rs", "path": "src"});
+        let s = tool_summary("find", &input, &cwd());
+        assert_eq!(s, "find: **/*.rs in src");
     }
 
     #[test]

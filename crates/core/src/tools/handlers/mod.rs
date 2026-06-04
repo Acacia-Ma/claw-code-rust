@@ -11,6 +11,7 @@ mod mcp;
 mod plan;
 mod question;
 mod read;
+mod ripgrep;
 mod shell_command;
 mod skill;
 mod task;
@@ -151,7 +152,15 @@ fn build_registry_from_builder(
                 builder.effective_deferred_loading_config(&DeferredLoadingConfig::default()),
             )),
         };
-        builder.register_handler(&name, handler);
+        let legacy_alias = match kind {
+            ToolHandlerKind::Bash if name == "shell_command" => Some("bash"),
+            ToolHandlerKind::Glob if name == "find" => Some("glob"),
+            _ => None,
+        };
+        builder.register_handler(&name, Arc::clone(&handler));
+        if let Some(alias) = legacy_alias {
+            builder.register_handler(alias, handler);
+        }
     }
     for (name, handler) in mcp_handlers {
         builder.register_handler(&name, handler);
@@ -166,4 +175,19 @@ fn build_registry_from_builder(
     );
 
     builder.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_registry_exposes_shell_command_and_accepts_bash_alias() {
+        let registry = build_registry_from_plan(&ToolPlanConfig::default());
+
+        assert!(registry.spec("shell_command").is_some());
+        assert!(registry.spec("bash").is_none());
+        assert!(registry.get("shell_command").is_some());
+        assert!(registry.get("bash").is_some());
+    }
 }

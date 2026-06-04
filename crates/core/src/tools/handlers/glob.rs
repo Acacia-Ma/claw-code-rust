@@ -1,6 +1,10 @@
+use std::ffi::OsString;
+
 use async_trait::async_trait;
 use tracing::debug;
 
+use super::ripgrep::RG_NO_MATCH_EXIT_CODE;
+use super::ripgrep::run_rg;
 use crate::contracts::{
     ToolCallError, ToolContext, ToolProgressSender, ToolResult, ToolResultContent,
 };
@@ -22,18 +26,22 @@ impl GlobHandler {
     pub fn new() -> Self {
         Self {
             spec: ToolSpec {
-                name: "glob".into(),
-                description: "Fast file pattern matching tool that works with any codebase size."
+                name: "find".into(),
+                description: "Fast filename and path search backed by ripgrep. Use only for literal file/path discovery; prefer code_search for codebase investigation."
                     .into(),
                 input_schema: JsonSchema::object(
                     std::collections::BTreeMap::from([
                         (
                             "pattern".to_string(),
-                            JsonSchema::string(Some("The glob pattern to match files against")),
+                            JsonSchema::string(Some(
+                                "The ripgrep glob pattern to match file paths against",
+                            )),
                         ),
                         (
                             "path".to_string(),
-                            JsonSchema::string(Some("The directory to search in")),
+                            JsonSchema::string(Some(
+                                "The directory to search in. Defaults to the workspace root.",
+                            )),
                         ),
                     ]),
                     Some(vec!["pattern".to_string()]),
@@ -68,57 +76,50 @@ impl ToolHandler for GlobHandler {
             .as_str()
             .ok_or_else(|| ToolCallError::InvalidInput("missing 'pattern' field".into()))?;
 
-        let base = match input["path"].as_str() {
-            Some(p) => {
-                let pb = std::path::PathBuf::from(p);
-                if pb.is_absolute() {
-                    pb
-                } else {
-                    ctx.workspace_root.join(pb)
-                }
-            }
-            None => ctx.workspace_root.clone(),
-        };
+        let path = input["path"].as_str().unwrap_or(".");
+        debug!(pattern, path, "find search");
 
-        debug!(pattern, base = %base.display(), "glob search");
+        let output = run_rg(
+            &ctx,
+            [
+                OsString::from("--files"),
+                OsString::from("--glob"),
+                OsString::from(pattern),
+                OsString::from("--"),
+                OsString::from(path),
+            ],
+        )
+        .await?;
 
-        let full_pattern = base.join(pattern);
-        let pattern_str = full_pattern.to_string_lossy();
-
-        let mut entries: Vec<(std::path::PathBuf, std::time::SystemTime)> = Vec::new();
-
-        match glob::glob(&pattern_str) {
-            Ok(paths) => {
-                for entry in paths.flatten() {
-                    let mtime = entry
-                        .metadata()
-                        .and_then(|m| m.modified())
-                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                    entries.push((entry, mtime));
-                }
-            }
-            Err(e) => {
-                return Ok(ToolResult::error(
-                    ToolResultContent::Text(format!("invalid glob pattern: {e}")),
-                    "Invalid pattern",
-                    ToolCallError::InvalidInput(format!("invalid glob pattern: {e}")),
-                ));
-            }
-        }
-
-        entries.sort_by_key(|(_, mtime)| std::cmp::Reverse(*mtime));
-
-        if entries.is_empty() {
+        let exit_code = output.status.code().unwrap_or(i32::MAX);
+        if exit_code == RG_NO_MATCH_EXIT_CODE {
             return Ok(ToolResult::success(
                 ToolResultContent::Text("(no matches)".into()),
                 "No matches",
             ));
         }
+        if exit_code != 0 {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let message = if stderr.is_empty() {
+                format!("ripgrep exited with status {exit_code}")
+            } else {
+                stderr
+            };
+            return Ok(ToolResult::error(
+                ToolResultContent::Text(message.clone()),
+                "Find failed",
+                ToolCallError::ExecutionFailed(message),
+            ));
+        }
 
-        let lines: Vec<String> = entries
-            .iter()
-            .map(|(p, _)| p.to_string_lossy().to_string())
-            .collect();
+        let text = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<&str> = text.lines().collect();
+        if lines.is_empty() {
+            return Ok(ToolResult::success(
+                ToolResultContent::Text("(no matches)".into()),
+                "No matches",
+            ));
+        }
 
         Ok(ToolResult::success(
             ToolResultContent::Text(lines.join("\n")),

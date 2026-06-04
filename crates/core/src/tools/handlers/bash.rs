@@ -25,16 +25,23 @@ impl BashHandler {
     pub fn new() -> Self {
         Self {
             spec: ToolSpec {
-                name: "bash".into(),
-                description: "Executes a given PowerShell (7+) command with optional timeout, ensuring proper handling and security measures.".into(),
+                name: "shell_command".into(),
+                description: "Executes a shell command in the selected platform shell with optional timeout and output limits.".into(),
                 input_schema: JsonSchema::object(
                     std::collections::BTreeMap::from([
                         ("command".to_string(), JsonSchema::string(Some("The command to execute"))),
+                        ("cmd".to_string(), JsonSchema::string(Some("Alias for command"))),
                         ("timeout".to_string(), JsonSchema::integer(Some("Optional timeout in milliseconds"))),
+                        ("timeout_ms".to_string(), JsonSchema::integer(Some("Alias for timeout"))),
                         ("workdir".to_string(), JsonSchema::string(Some("The working directory to run the command in"))),
                         ("description".to_string(), JsonSchema::string(Some("Clear, concise description of what this command does"))),
+                        ("shell".to_string(), JsonSchema::string(Some("Optional shell binary to launch"))),
+                        ("tty".to_string(), JsonSchema::boolean(Some("Whether to allocate a TTY"))),
+                        ("login".to_string(), JsonSchema::boolean(Some("Whether to use login shell semantics"))),
+                        ("yield_time_ms".to_string(), JsonSchema::number(Some("Milliseconds to wait for output before yielding"))),
+                        ("max_output_tokens".to_string(), JsonSchema::number(Some("Maximum output tokens to return"))),
                     ]),
-                    Some(vec!["command".to_string(), "description".to_string()]),
+                    Some(vec!["command".to_string()]),
                     None,
                 ),
                 output_mode: ToolOutputMode::Text,
@@ -68,7 +75,10 @@ impl ToolHandler for BashHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolCallError::InvalidInput("missing 'command' field".into()))?;
 
-        let timeout_ms = input["timeout"].as_u64().unwrap_or(default_timeout_ms());
+        let timeout_ms = input["timeout"]
+            .as_u64()
+            .or_else(|| input["timeout_ms"].as_u64())
+            .unwrap_or(default_timeout_ms());
         let workdir = input["workdir"]
             .as_str()
             .map(std::path::PathBuf::from)

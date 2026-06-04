@@ -8,11 +8,20 @@
 
 $ErrorActionPreference = "Stop"
 $Repo = "7df-lab/devo"
+$RipgrepRepo = "BurntSushi/ripgrep"
 
 # ── Platform detection ───────────────────────────────────────────────────
 function Get-Target {
     $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else {
         Write-Error "32-bit Windows is not supported"
+        exit 1
+    }
+    return "${arch}-pc-windows-msvc"
+}
+
+function Get-RipgrepTarget {
+    $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else {
+        Write-Error "32-bit Windows is not supported for ripgrep"
         exit 1
     }
     return "${arch}-pc-windows-msvc"
@@ -114,13 +123,21 @@ namespace Win32 {
 }
 
 # ── Resolve version ──────────────────────────────────────────────────────
+function Resolve-GitHubLatestVersion {
+    param(
+        [string]$RepoName
+    )
+
+    $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoName/releases/latest"
+    return $latest.tag_name
+}
+
 function Resolve-Version {
     if ($env:VERSION) {
         return $env:VERSION
     }
 
-    $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
-    return $latest.tag_name
+    return Resolve-GitHubLatestVersion -RepoName $Repo
 }
 
 # ── Banner ───────────────────────────────────────────────────────────────
@@ -133,6 +150,43 @@ function Print-Banner {
     Write-Host "██████╔╝ ███████╗ ╚████╔╝ ╚██████╔╝" -ForegroundColor DarkGray
     Write-Host "╚═════╝  ╚══════╝  ╚═══╝   ╚═════╝" -ForegroundColor DarkGray
     Write-Host ""
+}
+
+function Install-RipgrepSidecar {
+    param(
+        [string]$InstallDir,
+        [string]$TempRoot
+    )
+
+    if ($env:DEVO_SKIP_RG_INSTALL -eq "1") {
+        Write-Host "Skipping ripgrep sidecar install because DEVO_SKIP_RG_INSTALL=1."
+        return
+    }
+
+    $targetPath = Join-Path $InstallDir "rg.exe"
+    if (Test-Path $targetPath) {
+        Write-Host "ripgrep sidecar is already installed at $targetPath"
+        return
+    }
+
+    $rgTarget = Get-RipgrepTarget
+    $rgVersion = Resolve-GitHubLatestVersion -RepoName $RipgrepRepo
+    $rgArchiveUrl = "https://github.com/$RipgrepRepo/releases/download/$rgVersion/ripgrep-${rgVersion}-${rgTarget}.zip"
+    $rgTmpDir = Join-Path $TempRoot "ripgrep"
+    New-Item -ItemType Directory -Force -Path $rgTmpDir | Out-Null
+
+    Write-Host "Downloading ripgrep $rgVersion for $rgTarget ..."
+
+    $rgZipPath = Join-Path $rgTmpDir "ripgrep.zip"
+    Invoke-WebRequest -Uri $rgArchiveUrl -OutFile $rgZipPath
+    Expand-Archive -Path $rgZipPath -DestinationPath $rgTmpDir -Force
+
+    $rgExe = Get-ChildItem -Recurse -Filter "rg.exe" -Path $rgTmpDir | Select-Object -First 1
+    if (-not $rgExe) {
+        Write-Error "rg.exe not found in the ripgrep archive"
+    }
+
+    Copy-Item -Path $rgExe.FullName -Destination $targetPath -Force
 }
 
 # ── Install ──────────────────────────────────────────────────────────────
@@ -165,10 +219,17 @@ function Main {
         $installDir = Join-Path $env:LOCALAPPDATA "Programs\devo"
         New-Item -ItemType Directory -Force -Path $installDir | Out-Null
         Copy-Item -Path $exe.FullName -Destination (Join-Path $installDir "devo.exe") -Force
+        Install-RipgrepSidecar -InstallDir $installDir -TempRoot $tmpDir
 
         Add-InstallDirToPath -InstallDir $installDir
 
         Write-Host "Installed devo to ${installDir}\devo.exe"
+        $rgPath = Join-Path $installDir "rg.exe"
+        if (Test-Path $rgPath) {
+            Write-Host "ripgrep sidecar available at $rgPath"
+        } else {
+            Write-Host "ripgrep sidecar was not installed."
+        }
         Write-Host "PATH was updated for future terminals."
         Write-Host "Open a new terminal, or run:"
         Write-Host "  `$env:Path = `"$installDir;`$env:Path`""

@@ -348,14 +348,18 @@ fn alias_map(registered: &HashSet<&str>) -> HashMap<String, String> {
         );
     }
 
-    insert_alias(&mut aliases, registered, "bash", "shell");
-    insert_alias(&mut aliases, registered, "terminal", "shell");
-    insert_alias(&mut aliases, registered, "runcommand", "shell");
-    insert_alias(&mut aliases, registered, "exec", "shell");
+    insert_alias(&mut aliases, registered, "bash", "shell_command");
+    insert_alias(&mut aliases, registered, "shell", "shell_command");
+    insert_alias(&mut aliases, registered, "terminal", "shell_command");
+    insert_alias(&mut aliases, registered, "runcommand", "shell_command");
+    insert_alias(&mut aliases, registered, "exec", "shell_command");
     insert_alias(&mut aliases, registered, "readfile", "read");
     insert_alias(&mut aliases, registered, "read-file", "read");
     insert_alias(&mut aliases, registered, "cat", "read");
     insert_alias(&mut aliases, registered, "view", "read");
+    insert_alias(&mut aliases, registered, "glob", "find");
+    insert_alias(&mut aliases, registered, "file-search", "find");
+    insert_alias(&mut aliases, registered, "file_search", "find");
     insert_alias(&mut aliases, registered, "rg", "grep");
     insert_alias(&mut aliases, registered, "ripgrep", "grep");
     insert_alias(&mut aliases, registered, "semantic-search", "code_search");
@@ -397,14 +401,13 @@ fn resolve_alias(requested_name: &str, alias_map: &HashMap<String, String>) -> S
 fn default_preloaded_tools() -> BTreeSet<String> {
     [
         "read",
+        "find",
         "grep",
-        "glob",
         "code_search",
         "ls",
         "write",
         "apply_patch",
-        "shell",
-        "bash",
+        "shell_command",
         "exec_command",
         "plan",
         "update_plan",
@@ -467,6 +470,7 @@ mod tests {
     fn tools() -> Vec<ToolDefinition> {
         vec![
             tool("read", "Read a file."),
+            tool("find", "Find files."),
             tool("grep", "Search file contents."),
             tool("ToolSearch", "Load deferred tools."),
             tool(
@@ -493,9 +497,9 @@ mod tests {
                 .iter()
                 .map(|tool| &tool.name)
                 .collect::<Vec<_>>(),
-            vec!["read", "grep", "ToolSearch", "web_search"]
+            vec!["read", "find", "grep", "ToolSearch", "web_search"]
         );
-        assert_eq!(prompt.core, vec!["read", "grep", "ToolSearch"]);
+        assert_eq!(prompt.core, vec!["read", "find", "grep", "ToolSearch"]);
         assert_eq!(prompt.loaded_deferred, vec!["web_search"]);
         assert_eq!(
             prompt.deferred,
@@ -534,7 +538,7 @@ mod tests {
 
         let result = execute_tool_search(
             "session-1",
-            "select:WebSearch,fetch-url,read",
+            "select:WebSearch,fetch-url,read,glob",
             &tools(),
             &mut loaded,
             &config,
@@ -546,12 +550,35 @@ mod tests {
             ToolSearchResult {
                 loaded: vec!["web_search".to_string(), "fetch_url".to_string()],
                 already_loaded: Vec::new(),
-                already_available: vec!["read".to_string()],
+                already_available: vec!["read".to_string(), "find".to_string()],
                 not_found: Vec::new(),
             }
         );
         assert!(loaded.is_loaded("session-1", "web_search"));
         assert!(loaded.is_loaded("session-1", "fetch_url"));
+    }
+
+    #[test]
+    fn tool_search_resolves_bash_alias_to_shell_command() {
+        let config = DeferredLoadingConfig::default();
+        let mut loaded = LoadedDeferredTools::default();
+        let tools = vec![
+            tool("shell_command", "Run a shell command."),
+            tool("ToolSearch", "Load deferred tools."),
+        ];
+
+        let result = execute_tool_search("session-1", "select:bash", &tools, &mut loaded, &config)
+            .expect("bash alias should resolve");
+
+        assert_eq!(
+            result,
+            ToolSearchResult {
+                loaded: Vec::new(),
+                already_loaded: Vec::new(),
+                already_available: vec!["shell_command".to_string()],
+                not_found: Vec::new(),
+            }
+        );
     }
 
     #[test]
@@ -640,7 +667,7 @@ mod tests {
         config.hidden.insert("secret_internal".to_string());
         let prompt = assemble_deferred_tool_prompt(&tools(), &BTreeSet::new(), &config);
 
-        assert_eq!(prompt.metrics.exposed_tool_count, 3);
+        assert_eq!(prompt.metrics.exposed_tool_count, 4);
         assert_eq!(prompt.metrics.hidden_tool_count, 3);
         assert_eq!(prompt.metrics.loaded_deferred_tool_count, 0);
         assert!(

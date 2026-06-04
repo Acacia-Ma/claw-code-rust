@@ -2288,8 +2288,8 @@ fn summarize_tool_call_update(payload: &ToolCallPayload) -> String {
     {
         return cmd;
     }
-    if payload.tool_name == "glob"
-        && summary == "glob {}"
+    if matches!(payload.tool_name.as_str(), "find" | "glob")
+        && (summary == "find {}" || summary == "glob {}")
         && let Some(cmd) = payload
             .command_actions
             .iter()
@@ -2330,7 +2330,7 @@ fn read_command_action_from_parameters(
     })
 }
 
-fn glob_command_action_from_parameters(
+fn find_command_action_from_parameters(
     command: &str,
     input: &serde_json::Value,
 ) -> Option<devo_protocol::parse_command::ParsedCommand> {
@@ -2366,14 +2366,15 @@ fn tool_call_started_actions(
             }),
         ];
     }
-    if payload.tool_name == "glob" {
+    if matches!(payload.tool_name.as_str(), "find" | "glob") {
+        let command = payload.tool_name.as_str();
         return vec![
-            glob_command_action_from_parameters("glob", &payload.parameters).unwrap_or_else(|| {
-                devo_protocol::parse_command::ParsedCommand::ListFiles {
-                    cmd: "glob".to_string(),
-                    path: Some("glob".to_string()),
-                }
-            }),
+            find_command_action_from_parameters(command, &payload.parameters).unwrap_or_else(
+                || devo_protocol::parse_command::ParsedCommand::ListFiles {
+                    cmd: command.to_string(),
+                    path: Some(command.to_string()),
+                },
+            ),
         ];
     }
     Vec::new()
@@ -2390,7 +2391,7 @@ fn tool_call_updated_actions(
         "read" => read_command_action_from_parameters(summary, &payload.parameters)
             .into_iter()
             .collect(),
-        "glob" => glob_command_action_from_parameters(summary, &payload.parameters)
+        "find" | "glob" => find_command_action_from_parameters(summary, &payload.parameters)
             .into_iter()
             .collect(),
         _ => Vec::new(),
@@ -2454,7 +2455,7 @@ fn summarize_tool_input(tool_name: &str, input: &serde_json::Value) -> String {
                 None => Some(format!("'{pattern}'")),
             }
         }
-        "glob" => {
+        "find" | "glob" => {
             let pattern = input
                 .get("pattern")
                 .and_then(serde_json::Value::as_str)

@@ -55,13 +55,13 @@ impl ToolPlanConfig {
 impl Default for ToolPlanConfig {
     fn default() -> Self {
         ToolPlanConfig {
-            use_shell_command: false,
+            use_shell_command: true,
             use_unified_exec: true,
         }
     }
 }
 
-fn bash_schema() -> JsonSchema {
+fn shell_command_schema() -> JsonSchema {
     JsonSchema::object(
         BTreeMap::from([
             (
@@ -77,6 +77,10 @@ fn bash_schema() -> JsonSchema {
             (
                 "timeout".to_string(),
                 JsonSchema::integer(Some("Optional timeout in milliseconds")),
+            ),
+            (
+                "timeout_ms".to_string(),
+                JsonSchema::integer(Some("Alias for timeout")),
             ),
             (
                 "workdir".to_string(),
@@ -146,45 +150,6 @@ fn bash_description() -> String {
         .replace("${maxBytes}", "64 KB")
 }
 
-fn shell_command_schema() -> JsonSchema {
-    JsonSchema::object(
-        BTreeMap::from([
-            (
-                "cmd".to_string(),
-                JsonSchema::string(Some("Shell command to execute.")),
-            ),
-            (
-                "workdir".to_string(),
-                JsonSchema::string(Some(
-                    "Optional working directory. Defaults to current directory.",
-                )),
-            ),
-            (
-                "shell".to_string(),
-                JsonSchema::string(Some(
-                    "Shell binary to launch (e.g. 'pwsh' or 'powershell' on Windows, 'bash' elsewhere).",
-                )),
-            ),
-            (
-                "tty".to_string(),
-                JsonSchema::boolean(Some(
-                    "Whether to allocate a TTY for the command. Defaults to false.",
-                )),
-            ),
-            (
-                "yield_time_ms".to_string(),
-                JsonSchema::number(Some("How long to wait (in ms) for output before yielding.")),
-            ),
-            (
-                "max_output_tokens".to_string(),
-                JsonSchema::number(Some("Maximum number of tokens to return.")),
-            ),
-        ]),
-        Some(vec!["cmd".to_string()]),
-        Some(false),
-    )
-}
-
 fn read_schema() -> JsonSchema {
     JsonSchema::object(
         BTreeMap::from([
@@ -227,16 +192,18 @@ fn write_schema() -> JsonSchema {
     )
 }
 
-fn glob_schema() -> JsonSchema {
+fn find_schema() -> JsonSchema {
     JsonSchema::object(
         BTreeMap::from([
             (
                 "pattern".to_string(),
-                JsonSchema::string(Some("The glob pattern to match files against")),
+                JsonSchema::string(Some("The ripgrep glob pattern to match file paths against")),
             ),
             (
                 "path".to_string(),
-                JsonSchema::string(Some("The directory to search in. Defaults to current dir.")),
+                JsonSchema::string(Some(
+                    "The directory to search in. Defaults to workspace root.",
+                )),
             ),
         ]),
         Some(vec!["pattern".to_string()]),
@@ -254,6 +221,10 @@ fn grep_schema() -> JsonSchema {
             (
                 "include".to_string(),
                 JsonSchema::string(Some("File pattern to include (e.g. '*.rs')")),
+            ),
+            (
+                "case_insensitive".to_string(),
+                JsonSchema::boolean(Some("Search without case sensitivity")),
             ),
             (
                 "path".to_string(),
@@ -557,25 +528,25 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
         plan.push(
             ToolSpec {
                 name: "shell_command".to_string(),
-                description: "Runs a command in a shell. Use this tool when you need to execute a command or start a long-running process. Prefer it over the 'bash' tool.".to_string(),
+                description: bash_description(),
                 input_schema: shell_command_schema(),
                 output_mode: ToolOutputMode::Mixed,
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
                 supports_parallel: false,
-            preparation_feedback: ToolPreparationFeedback::None,
-            display_name: None,
-            supports_cancellation: None,
-            supports_streaming: None,
+                preparation_feedback: ToolPreparationFeedback::None,
+                display_name: None,
+                supports_cancellation: None,
+                supports_streaming: None,
             },
-            ToolHandlerKind::ShellCommand,
+            ToolHandlerKind::Bash,
         );
     } else {
         plan.push(
             ToolSpec {
                 name: "bash".to_string(),
                 description: bash_description(),
-                input_schema: bash_schema(),
+                input_schema: shell_command_schema(),
                 output_mode: ToolOutputMode::Mixed,
                 execution_mode: ToolExecutionMode::Mutating,
                 capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
@@ -625,10 +596,9 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
 
     plan.push(
         ToolSpec {
-            name: "glob".to_string(),
-            description: "Fast file pattern matching tool that works with any codebase size."
-                .to_string(),
-            input_schema: glob_schema(),
+            name: "find".to_string(),
+            description: "Fast filename and path search backed by ripgrep. Use only for literal file/path discovery; prefer code_search for codebase investigation.".to_string(),
+            input_schema: find_schema(),
             output_mode: ToolOutputMode::Text,
             execution_mode: ToolExecutionMode::ReadOnly,
             capability_tags: vec![ToolCapabilityTag::SearchWorkspace],
@@ -644,7 +614,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
     plan.push(
         ToolSpec {
             name: "grep".to_string(),
-            description: "Fast content search tool that works with any codebase size.".to_string(),
+            description: "Fast exact text and regex content search backed by ripgrep. Use grep for known strings or regexes; prefer code_search for codebase investigation.".to_string(),
             input_schema: grep_schema(),
             output_mode: ToolOutputMode::Text,
             execution_mode: ToolExecutionMode::ReadOnly,
@@ -661,7 +631,7 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
     plan.push(
         ToolSpec {
             name: "code_search".to_string(),
-            description: "Semble-style hybrid code retrieval for the current workspace. Use this for natural-language codebase questions, symbol-oriented searches, and finding chunks related to a source location when grep is too literal.".to_string(),
+            description: "Preferred codebase investigation and code retrieval tool for the current workspace. Use code_search before find or grep when you need to understand how code is implemented, locate relevant modules or symbols, answer architecture questions, find related code, or search by natural-language intent.".to_string(),
             input_schema: code_search_schema(),
             output_mode: ToolOutputMode::StructuredJson,
             execution_mode: ToolExecutionMode::ReadOnly,
@@ -890,7 +860,7 @@ mod tests {
     fn config_default_has_unified_exec_enabled() {
         let config = ToolPlanConfig::default();
         assert!(config.use_unified_exec);
-        assert!(!config.use_shell_command);
+        assert!(config.use_shell_command);
     }
 
     #[test]
@@ -921,19 +891,13 @@ mod tests {
     }
 
     #[test]
-    fn bash_schema_has_command_and_cmd() {
-        let schema = bash_schema();
+    fn shell_command_schema_has_command_and_cmd() {
+        let schema = shell_command_schema();
         let props = schema.properties.as_ref().unwrap();
         assert!(props.contains_key("command"));
         assert!(props.contains_key("cmd"));
+        assert!(props.contains_key("timeout_ms"));
         assert!(props.contains_key("tty"));
-    }
-
-    #[test]
-    fn shell_command_schema_has_cmd() {
-        let schema = shell_command_schema();
-        let props = schema.properties.as_ref().unwrap();
-        assert!(props.contains_key("cmd"));
     }
 
     #[test]
@@ -945,6 +909,34 @@ mod tests {
         let handler_names: Vec<&str> = plan.handlers.iter().map(|(_, n)| n.as_str()).collect();
         assert!(!handler_names.contains(&"exec_command"));
         assert!(!handler_names.contains(&"write_stdin"));
+    }
+
+    #[test]
+    fn plan_builder_registers_shell_command_not_bash_by_default() {
+        let plan = build_tool_registry_plan(&ToolPlanConfig::default());
+        let spec_names: Vec<&str> = plan.specs.iter().map(|spec| spec.name.as_str()).collect();
+
+        assert!(spec_names.contains(&"shell_command"));
+        assert!(!spec_names.contains(&"bash"));
+        assert!(
+            plan.handlers
+                .iter()
+                .any(|(kind, name)| *kind == ToolHandlerKind::Bash && name == "shell_command")
+        );
+    }
+
+    #[test]
+    fn plan_builder_registers_find_not_glob() {
+        let plan = build_tool_registry_plan(&ToolPlanConfig::default());
+        let spec_names: Vec<&str> = plan.specs.iter().map(|spec| spec.name.as_str()).collect();
+
+        assert!(spec_names.contains(&"find"));
+        assert!(!spec_names.contains(&"glob"));
+        assert!(
+            plan.handlers
+                .iter()
+                .any(|(kind, name)| *kind == ToolHandlerKind::Glob && name == "find")
+        );
     }
 
     /// Trace: L2-DES-TOOL-001

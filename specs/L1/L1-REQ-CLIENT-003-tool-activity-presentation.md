@@ -28,7 +28,7 @@ The program must provide client-facing tool activity presentation that groups re
 ## Functional Requirements
 
 - In the TUI client, consecutive `read` tool calls must be grouped together on a single line and labeled `read`.
-- In the TUI client, consecutive `glob` and `grep` tool calls must be grouped together on a single line and labeled `search`.
+- In the TUI client, consecutive `find` and `grep` tool calls must be grouped together on a single line and labeled `search`.
 - In the TUI client, `read` and `search` activity must be nested under an `Explore` group.
 - In the TUI client, model reasoning content and the model response must mark the beginning and end of an `Explore` group.
 - In the TUI client, `write` and `apply_patch` activity must be nested under a `File Update` group.
@@ -48,7 +48,7 @@ The program must provide client-facing tool activity presentation that groups re
 ## Acceptance Criteria
 
 - Given consecutive `read` calls occur in the TUI client, when they are rendered, then they appear as one grouped `read` line.
-- Given consecutive `glob` or `grep` calls occur in the TUI client, when they are rendered, then they appear as one grouped `search` line.
+- Given consecutive `find` or `grep` calls occur in the TUI client, when they are rendered, then they appear as one grouped `search` line.
 - Given `read` or `search` activity occurs, when the TUI renders it, then it is shown within an `Explore` group.
 - Given `write` activity occurs, when the TUI renders it, then it is shown within a `File Update` group and may be labeled `Created`.
 - Given `apply_patch` activity occurs, when the TUI renders it, then it is shown within a `File Update` group and labeled `Edited`.

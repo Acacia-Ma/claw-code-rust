@@ -144,10 +144,11 @@ impl ToolRuntime {
 
         let mut indexed_results = Vec::with_capacity(calls.len());
 
-        let (parallel, exclusive): (Vec<_>, Vec<_>) = calls
-            .iter()
-            .enumerate()
-            .partition(|(_, call)| self.registry.supports_parallel(&call.name));
+        let (parallel, exclusive): (Vec<_>, Vec<_>) =
+            calls.iter().enumerate().partition(|(_, call)| {
+                let tool_name = canonical_tool_name(&self.registry, &call.name);
+                self.registry.supports_parallel(tool_name)
+            });
 
         if !parallel.is_empty() {
             let _guard = self.gate.read().await;
@@ -187,7 +188,12 @@ impl ToolRuntime {
         call: &ToolCall,
         _on_progress: &Option<ProgressCallbackArc>,
     ) -> ToolCallResult {
-        let tool = match self.registry.get(&call.name) {
+        let tool_name = canonical_tool_name(&self.registry, &call.name);
+        let tool = match self
+            .registry
+            .get(tool_name)
+            .or_else(|| self.registry.get(&call.name))
+        {
             Some(t) => t.clone(),
             None => {
                 warn!(tool = %call.name, "tool not found");
@@ -195,7 +201,7 @@ impl ToolRuntime {
             }
         };
 
-        if let Some(request) = self.permission_request_for_call(call) {
+        if let Some(request) = self.permission_request_for_call(call, tool_name) {
             match self.permission.check(request).await {
                 Ok(()) => {}
                 Err(reason) => {
@@ -207,7 +213,7 @@ impl ToolRuntime {
             }
         }
 
-        info!(tool = %call.name, id = %call.id, "executing tool");
+        info!(tool = %tool_name, id = %call.id, "executing tool");
 
         // TODO: BUG here, the cancel_token should take as a parameter, pass from outside of execute_single
         // TODO: The budgets should take as a parameter, pass from outside of execute_single
@@ -255,8 +261,12 @@ impl ToolRuntime {
         }
     }
 
-    fn permission_request_for_call(&self, call: &ToolCall) -> Option<ToolPermissionRequest> {
-        let spec = self.registry.spec(&call.name)?;
+    fn permission_request_for_call(
+        &self,
+        call: &ToolCall,
+        tool_name: &str,
+    ) -> Option<ToolPermissionRequest> {
+        let spec = self.registry.spec(tool_name)?;
         let needs_permission = spec.execution_mode == crate::tool_spec::ToolExecutionMode::Mutating
             || spec
                 .capability_tags
@@ -266,21 +276,21 @@ impl ToolRuntime {
             return None;
         }
 
-        let resource = resource_kind_for_tool(&call.name, &spec.capability_tags);
-        let path = path_for_tool_input(&call.name, &call.input, &self.context.cwd);
-        let host = host_for_tool_input(&call.name, &call.input);
-        let target = target_for_tool_input(&call.name, &call.input);
-        let command_prefix = command_prefix_for_tool_input(&call.name, &call.input);
+        let resource = resource_kind_for_tool(tool_name, &spec.capability_tags);
+        let path = path_for_tool_input(tool_name, &call.input, &self.context.cwd);
+        let host = host_for_tool_input(tool_name, &call.input);
+        let target = target_for_tool_input(tool_name, &call.input);
+        let command_prefix = command_prefix_for_tool_input(tool_name, &call.input);
         Some(ToolPermissionRequest {
             tool_call_id: call.id.clone(),
-            tool_name: call.name.clone(),
+            tool_name: tool_name.to_string(),
             input: call.input.clone(),
             cwd: self.context.cwd.clone(),
             session_id: self.context.session_id.clone(),
             turn_id: self.context.turn_id.clone(),
             resource,
             action_summary: crate::tool_summary::tool_summary(
-                &call.name,
+                tool_name,
                 &call.input,
                 &self.context.cwd,
             ),
@@ -291,6 +301,14 @@ impl ToolRuntime {
             command_prefix,
             requests_escalation: requests_explicit_escalation(&call.input),
         })
+    }
+}
+
+fn canonical_tool_name<'a>(registry: &ToolRegistry, tool_name: &'a str) -> &'a str {
+    match tool_name {
+        "bash" if registry.spec("shell_command").is_some() => "shell_command",
+        "glob" if registry.spec("find").is_some() => "find",
+        _ => tool_name,
     }
 }
 
@@ -379,7 +397,7 @@ fn path_for_tool_input(tool_name: &str, input: &serde_json::Value, cwd: &Path) -
             .get("filePath")
             .and_then(serde_json::Value::as_str)
             .or_else(|| input.get("path").and_then(serde_json::Value::as_str)),
-        "grep" | "glob" => input.get("path").and_then(serde_json::Value::as_str),
+        "find" | "grep" | "glob" => input.get("path").and_then(serde_json::Value::as_str),
         "code_search" => input
             .get("path")
             .and_then(serde_json::Value::as_str)
@@ -877,6 +895,57 @@ mod tests {
         assert_eq!(request.session_id, "session-1");
         assert_eq!(request.turn_id, Some("turn-1".into()));
         assert_eq!(request.resource, devo_safety::ResourceKind::FileWrite);
+    }
+
+    #[tokio::test]
+    async fn bash_alias_uses_shell_command_permission_metadata() {
+        let mut builder = ToolRegistryBuilder::new();
+        let handler: Arc<dyn ToolHandler> = Arc::new(WriteTool::new());
+        builder.register_handler("shell_command", Arc::clone(&handler));
+        builder.register_handler("bash", handler);
+        builder.push_spec(ToolSpec {
+            name: "shell_command".into(),
+            description: String::new(),
+            input_schema: JsonSchema::object(Default::default(), None, None),
+            output_mode: ToolOutputMode::Text,
+            execution_mode: ToolExecutionMode::Mutating,
+            capability_tags: vec![ToolCapabilityTag::ExecuteProcess],
+            supports_parallel: false,
+            preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
+        });
+        let registry = Arc::new(builder.build());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = std::sync::Mutex::new(Some(tx));
+        let checker = PermissionChecker::new(move |request| {
+            tx.lock()
+                .expect("lock sender")
+                .take()
+                .expect("send once")
+                .send(request)
+                .expect("receiver still alive");
+            Box::pin(async { Err("blocked".into()) })
+        });
+        let runtime = ToolRuntime::new(registry, checker);
+        let call = ToolCall {
+            id: "call-1".into(),
+            name: "bash".into(),
+            input: serde_json::json!({ "command": "git status" }),
+        };
+
+        let result = runtime.execute_single(&call, &None).await;
+        let request = rx.await.expect("permission request");
+
+        assert!(result.is_error);
+        assert_eq!(request.tool_name, "shell_command");
+        assert_eq!(request.resource, devo_safety::ResourceKind::ShellExec);
+        assert_eq!(request.target.as_deref(), Some("git status"));
+        assert_eq!(
+            request.command_prefix,
+            Some(vec!["git".to_string(), "status".to_string()])
+        );
     }
 
     #[test]

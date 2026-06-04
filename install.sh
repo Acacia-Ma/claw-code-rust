@@ -9,6 +9,8 @@ set -eu
 
 APP="devo"
 REPO="7df-lab/devo"
+RG_APP="rg"
+RG_REPO="BurntSushi/ripgrep"
 INSTALL_DIR_DEFAULT="${HOME}/.devo/bin"
 
 MUTED="$(printf '\033[0;2m')"
@@ -37,6 +39,7 @@ Options:
 Environment:
     VERSION                 Same as --version
     DEVO_INSTALL_DIR        Same as --install-dir
+    DEVO_SKIP_RG_INSTALL=1 Skip installing the ripgrep sidecar
 
 Examples:
     curl -fsSL https://raw.githubusercontent.com/7df-lab/devo/main/install.sh | sh
@@ -143,6 +146,31 @@ detect_target() {
     printf '%s-%s\n' "$arch" "$os"
 }
 
+detect_rg_target() {
+    raw_os="$(uname -s)"
+    raw_arch="$(uname -m)"
+
+    case "$raw_os" in
+        Linux)
+            case "$raw_arch" in
+                x86_64|amd64) printf '%s\n' "x86_64-unknown-linux-musl" ;;
+                aarch64|arm64) printf '%s\n' "aarch64-unknown-linux-gnu" ;;
+                *) die "Unsupported architecture for ripgrep: $raw_arch" ;;
+            esac
+            ;;
+        Darwin)
+            case "$raw_arch" in
+                x86_64|amd64) printf '%s\n' "x86_64-apple-darwin" ;;
+                aarch64|arm64) printf '%s\n' "aarch64-apple-darwin" ;;
+                *) die "Unsupported architecture for ripgrep: $raw_arch" ;;
+            esac
+            ;;
+        *)
+            die "Unsupported OS for ripgrep: $raw_os"
+            ;;
+    esac
+}
+
 resolve_latest_version() {
     require_command curl "Error: 'curl' is required but not installed."
     require_command sed "Error: 'sed' is required but not installed."
@@ -155,6 +183,23 @@ resolve_latest_version() {
 
     if [ -z "$latest" ]; then
         die "Failed to resolve the latest release version"
+    fi
+
+    printf '%s\n' "$latest"
+}
+
+resolve_latest_ripgrep_version() {
+    require_command curl "Error: 'curl' is required but not installed."
+    require_command sed "Error: 'sed' is required but not installed."
+
+    latest="$(
+        curl -fsSL "https://api.github.com/repos/${RG_REPO}/releases/latest" \
+            | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+            | sed -n '1p'
+    )"
+
+    if [ -z "$latest" ]; then
+        die "Failed to resolve the latest ripgrep release version"
     fi
 
     printf '%s\n' "$latest"
@@ -320,7 +365,11 @@ check_version() {
 
     if printf '%s' "$installed_version" | grep -F "$normalized_expected" >/dev/null 2>&1; then
         print_message info "${MUTED}${APP} ${NC}${expected_version}${MUTED} is already installed at ${NC}${installed_path}"
-        exit 0
+        if [ "${DEVO_SKIP_RG_INSTALL:-}" = "1" ] || [ -x "${install_dir}/${RG_APP}" ]; then
+            exit 0
+        fi
+        print_message info "${MUTED}ripgrep sidecar is missing; continuing installation.${NC}"
+        return
     fi
 
     if [ -n "$installed_version" ]; then
@@ -334,6 +383,17 @@ find_extracted_binary() {
 
     if [ -z "$found_binary" ]; then
         die "Failed to locate the ${APP} binary inside the downloaded archive"
+    fi
+
+    printf '%s\n' "$found_binary"
+}
+
+find_extracted_rg_binary() {
+    search_dir="$1"
+    found_binary="$(find "$search_dir" -name "$RG_APP" -type f | sed -n '1p')"
+
+    if [ -z "$found_binary" ]; then
+        die "Failed to locate the ${RG_APP} binary inside the downloaded ripgrep archive"
     fi
 
     printf '%s\n' "$found_binary"
@@ -378,6 +438,44 @@ download_and_install() {
     trap - EXIT INT TERM
 }
 
+install_ripgrep_sidecar() {
+    if [ "${DEVO_SKIP_RG_INSTALL:-}" = "1" ]; then
+        print_message warning "Skipping ripgrep sidecar install because DEVO_SKIP_RG_INSTALL=1."
+        return
+    fi
+
+    if [ -x "${install_dir}/${RG_APP}" ]; then
+        print_message info "${MUTED}ripgrep sidecar is already installed at ${NC}${install_dir}/${RG_APP}"
+        return
+    fi
+
+    require_command curl "Error: 'curl' is required but not installed."
+    require_command tar "Error: 'tar' is required but not installed."
+    require_command find "Error: 'find' is required but not installed."
+
+    rg_target="$(detect_rg_target)"
+    rg_version="$(resolve_latest_ripgrep_version)"
+    archive_name="ripgrep-${rg_version}-${rg_target}.tar.gz"
+    archive_url="https://github.com/${RG_REPO}/releases/download/${rg_version}/${archive_name}"
+
+    print_message info ""
+    print_message info "${MUTED}Installing ripgrep sidecar ${NC}${rg_version}${MUTED} target: ${NC}${rg_target}"
+
+    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/${APP}-rg-install.XXXXXX")"
+    trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+
+    curl -fL --progress-bar "$archive_url" -o "$tmp_dir/$archive_name"
+    tar -xzf "$tmp_dir/$archive_name" -C "$tmp_dir"
+
+    extracted_binary="$(find_extracted_rg_binary "$tmp_dir")"
+
+    mkdir -p "$install_dir"
+    install -m 755 "$extracted_binary" "${install_dir}/${RG_APP}"
+
+    rm -rf "$tmp_dir"
+    trap - EXIT INT TERM
+}
+
 
 print_banner() {
     printf '\n'
@@ -412,6 +510,8 @@ main() {
         check_version "$version_tag"
         download_and_install "$target" "$version_tag"
     fi
+
+    install_ripgrep_sidecar
 
     print_path_hint "$install_dir"
 

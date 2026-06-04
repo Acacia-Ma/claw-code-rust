@@ -68,7 +68,6 @@ diffy = "0.4.2"
 dirs = "6"
 fs2 = "0.4"
 futures = { version = "0.3", default-features = false }
-glob = "0.3"
 hf-hub = { version = "1.0.0-rc.1", features = ["blocking", "rustls-tls"] }
 hnsw_rs = "0.3.4"
 iana-time-zone = "0.1.65"

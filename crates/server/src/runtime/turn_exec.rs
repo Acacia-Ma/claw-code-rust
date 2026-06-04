@@ -101,7 +101,7 @@ fn command_display_from_input(tool_name: &str, input: &serde_json::Value) -> Str
                 .unwrap_or_default();
             format!("read {path}")
         }
-        "glob" => {
+        "find" | "glob" => {
             let pattern = input
                 .get("pattern")
                 .and_then(serde_json::Value::as_str)
@@ -110,10 +110,11 @@ fn command_display_from_input(tool_name: &str, input: &serde_json::Value) -> Str
                 .get("path")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
+            let command_name = if tool_name == "find" { "find" } else { "glob" };
             if path.is_empty() {
-                format!("glob {pattern}")
+                format!("{command_name} {pattern}")
             } else {
-                format!("glob {pattern} in {path}")
+                format!("{command_name} {pattern} in {path}")
             }
         }
         "grep" => {
@@ -144,9 +145,9 @@ fn command_actions_from_tool_input(
         "read" => crate::tool_actions::read_action_from_tool_input(command, input)
             .into_iter()
             .collect(),
-        "glob" => vec![devo_protocol::parse_command::ParsedCommand::ListFiles {
+        "find" | "glob" => vec![devo_protocol::parse_command::ParsedCommand::ListFiles {
             cmd: command.to_string(),
-            path: glob_display_from_input(input),
+            path: find_display_from_input(input),
         }],
         "grep" => vec![devo_protocol::parse_command::ParsedCommand::Search {
             cmd: command.to_string(),
@@ -163,7 +164,7 @@ fn command_actions_from_tool_input(
     }
 }
 
-fn glob_display_from_input(input: &serde_json::Value) -> Option<String> {
+fn find_display_from_input(input: &serde_json::Value) -> Option<String> {
     let pattern = input
         .get("pattern")
         .and_then(serde_json::Value::as_str)
@@ -1673,6 +1674,25 @@ mod tests {
             actions,
             vec![devo_protocol::parse_command::ParsedCommand::ListFiles {
                 cmd: "glob **/Cargo.toml in crates".to_string(),
+                path: Some("**/Cargo.toml in crates".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn command_actions_from_find_tool_input_include_pattern_and_path() {
+        let actions = command_actions_from_tool_input(
+            "find",
+            "find **/Cargo.toml in crates",
+            &serde_json::json!({
+                "pattern": "**/Cargo.toml",
+                "path": "crates"
+            }),
+        );
+        assert_eq!(
+            actions,
+            vec![devo_protocol::parse_command::ParsedCommand::ListFiles {
+                cmd: "find **/Cargo.toml in crates".to_string(),
                 path: Some("**/Cargo.toml in crates".to_string()),
             }]
         );

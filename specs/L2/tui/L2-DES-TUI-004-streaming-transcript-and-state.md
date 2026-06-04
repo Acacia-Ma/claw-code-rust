@@ -92,7 +92,7 @@ The TUI should use explicit cell types rather than a single generic text block.
 | User message | User-submitted content and mentions. | Yes |
 | Assistant message | Final or streaming assistant response. | Yes |
 | Reasoning summary | User-visible reasoning summary where available and allowed. | Yes, when emitted as visible item |
-| Explore tool group | Read, glob, and grep/search activity grouped for scanning. | Yes |
+| Explore tool group | Read, find, and grep/search activity grouped for scanning. | Yes |
 | File mutation tool | Create/write and edit/apply-patch activity with diff preview. | Yes |
 | Shell running cell | Active shell command state. | No, reconciles into shell result |
 | Shell result cell | Completed shell command output summary and folded output. | Yes |
@@ -383,17 +383,17 @@ The completed-only form should appear only in explicit plan history, status, or 
 
 Tool message cells begin with a single `┃` and should communicate the tool family, target, and outcome without requiring raw logs.
 
-### Explore Tools: Read, Glob, Grep
+### Explore Tools: Read, Find, Grep
 
-`read`, `glob`, and `grep` are grouped under `Explore`.
+`read`, `find`, and `grep` are grouped under `Explore`.
 
 Rules:
 
 - Consecutive `read` calls may be grouped under a single `Explore` title.
 - Each `read` call renders on its own line. Multiple read targets must not be merged into one `Read` line.
 - The `read` target must include the file parameter.
-- `glob` and `grep` each render as their own line even when consecutive.
-- `glob` is file-pattern search. `grep` is content search.
+- `find` and `grep` each render as their own line even when consecutive.
+- `find` is file-pattern search. `grep` is content search.
 
 Example:
 
@@ -401,7 +401,7 @@ Example:
 ┃ Explore
   ┗ Read  crates/core/src/query.rs
     Read  crates/core/src/session/turn.rs
-    Glob  crates/**/*.rs
+    Find  crates/**/*.rs
     Grep  "execute_turn" crates/core
 ```
 

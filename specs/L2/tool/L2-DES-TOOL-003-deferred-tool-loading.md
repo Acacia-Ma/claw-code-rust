@@ -62,7 +62,7 @@ The mechanism must:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ System Prompt                                                 │
-│   [Pre-loaded tool schemas: read, grep, glob, ...]           │
+│   [Pre-loaded tool schemas: read, find, grep, code_search, ...] │
 │                                                               │
 │   <system-reminder>                                           │
 │   Deferred tools:                                             │
@@ -87,7 +87,7 @@ The mechanism must:
          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Next Turn Prompt                                              │
-│   [Pre-loaded tool schemas: read, grep, glob, ...]           │
+│   [Pre-loaded tool schemas: read, find, grep, code_search, ...] │
 │   [Loaded deferred schemas: web_search, fetch_url]            │
 │   <system-reminder>                                           │
 │   Deferred tools:                                             │
@@ -109,12 +109,13 @@ These tools are always included in every model turn. They are the tools the mode
 | Tool | Category | Purpose |
 |---|---|---|
 | `read` | File read | Read file contents and metadata, including supported attachments. |
+| `find` | Search | Filename and path search backed by ripgrep. |
 | `grep` | Search | High-performance content search, normally backed by ripgrep. |
-| `glob` | Search | File path search with glob patterns, inclusions, and exclusions. |
+| `code_search` | Search | Preferred codebase investigation and code retrieval tool. |
 | `ls` | File read | List directory contents with optional pattern filtering. |
 | `write` | File mutation | Create or overwrite files through structured content. |
 | `apply_patch` | File mutation | Apply structured patches to files. |
-| `shell` | Command execution | Execute shell commands with bounded output, timeout, approval, and background-process policy. |
+| `shell_command` | Command execution | Execute shell commands with bounded output, timeout, approval, and background-process policy. |
 | `plan` | Planning | Maintain a visible to-do list for multi-step work. |
 | `approval` | Approval | Request user approval for gated actions. |
 | `question` | Plan Mode question | Ask Plan Mode clarification questions where allowed. |
@@ -226,9 +227,9 @@ Key alias categories:
 | Alias Pattern | Maps To | Examples |
 |---|---|---|
 | Case variants | Canonical tool name | `WebSearch` → `web_search` |
-| Legacy / shorthand names | Canonical tool name | `bash` → `shell`, `readfile` → `read` |
+| Legacy / shorthand names | Canonical tool name | `bash` -> `shell_command`, `readfile` -> `read` |
 | Kebab-case variants | Canonical tool name | `fetch-url` → `fetch_url` |
-| Common synonyms | Canonical tool name | `terminal` → `shell`, `runcommand` → `shell` |
+| Common synonyms | Canonical tool name | `terminal` -> `shell_command`, `runcommand` -> `shell_command` |
 
 If no alias match is found, the raw name is used as-is for lookup. This means the model must use exact tool names as listed in the deferred reminder.
 
@@ -240,7 +241,7 @@ Each requested tool name is looked up in the session deferred tool catalog. The 
 |---|---|---|
 | **Loaded** | Found in deferred list AND not yet loaded this session | `Loaded N tool(s): Name1, Name2, ...` |
 | **Already loaded** | Found in deferred list AND already loaded | `Already loaded N tool(s): Name1. Call these tools directly...` |
-| **Already available** | NOT in deferred list because it is pre-loaded | `Already available N tool(s): read, apply_patch, shell. Call these tools directly without loading.` |
+| **Already available** | NOT in deferred list because it is pre-loaded | `Already available N tool(s): read, apply_patch, shell_command. Call these tools directly without loading.` |
 | **Not found** | Not in deferred list AND not a pre-loaded tool | `Not found: ImaginaryTool. Only request exact tool names from the Deferred tools list above.` |
 
 ### Step 4 — Mark as Loaded
@@ -258,7 +259,7 @@ The executor yields a single text result summarizing what happened:
 ```
 Loaded 2 tool(s): fetch_url, web_search
 Already loaded 1 tool(s): skill
-Already available 3 tool(s): read, apply_patch, shell. Call these tools directly without loading.
+Already available 3 tool(s): read, apply_patch, shell_command. Call these tools directly without loading.
 ```
 
 The output is formatted for both model consumption and human readability in the TUI.
@@ -355,8 +356,9 @@ The full alias mapping table is maintained in the ToolSearch executor module and
 | Alias | Maps To | Category |
 |---|---|---|
 | `web_search`, `web-search`, `WebSearch` | `web_search` | Format variants |
-| `bash`, `shell`, `runcommand`, `terminal`, `exec` | `shell` | Synonyms |
+| `bash`, `shell`, `runcommand`, `terminal`, `exec` | `shell_command` | Synonyms |
 | `readfile`, `read-file`, `cat`, `view` | `read` | Synonyms |
+| `glob`, `file_search`, `file-search` | `find` | Legacy and synonyms |
 | `grep_tool`, `grep-tool`, `rg`, `ripgrep`, `search_content` | `grep` | Synonyms |
 | `fetch_url`, `fetch-url`, `urlfetch`, `scrape`, `curl` | `fetch_url` | Synonyms |
 | `apply_patch`, `apply-patch`, `patch` | `apply_patch` | Format variants |
@@ -391,7 +393,7 @@ In user or project `config.toml`:
 [tools.deferred_loading]
 enabled = true
 default_policy = "defer_optional"
-preloaded = ["read", "grep", "glob", "ls", "write", "apply_patch", "shell", "plan", "approval"]
+preloaded = ["read", "find", "grep", "code_search", "ls", "write", "apply_patch", "shell_command", "plan", "approval"]
 deferred = ["web_search", "fetch_url", "skill", "spawn_subagent", "multi_tool_use"]
 hidden = []
 

@@ -150,15 +150,17 @@ pub(crate) fn history_item_from_turn_item(item: &TurnItem) -> Option<SessionHist
                 title.clone(),
                 String::new(),
             );
-            if matches!(tool_name.as_str(), "read" | "glob" | "grep") {
+            if matches!(tool_name.as_str(), "read" | "find" | "glob" | "grep") {
                 let parsed = match tool_name.as_str() {
                     "read" => crate::tool_actions::read_action_from_tool_input(&title, input)
                         .into_iter()
                         .collect(),
-                    "glob" => vec![devo_protocol::parse_command::ParsedCommand::ListFiles {
-                        cmd: title.clone(),
-                        path: glob_display_from_input(input),
-                    }],
+                    "find" | "glob" => {
+                        vec![devo_protocol::parse_command::ParsedCommand::ListFiles {
+                            cmd: title.clone(),
+                            path: find_display_from_input(input),
+                        }]
+                    }
                     "grep" => vec![devo_protocol::parse_command::ParsedCommand::Search {
                         cmd: title.clone(),
                         query: input
@@ -425,7 +427,7 @@ fn summarize_tool_call(tool_name: &str, input: &serde_json::Value) -> String {
     devo_core::tools::tool_summary::tool_summary(tool_name, input, &cwd).replacen(": ", " ", 1)
 }
 
-fn glob_display_from_input(input: &serde_json::Value) -> Option<String> {
+fn find_display_from_input(input: &serde_json::Value) -> Option<String> {
     let pattern = input
         .get("pattern")
         .and_then(serde_json::Value::as_str)
