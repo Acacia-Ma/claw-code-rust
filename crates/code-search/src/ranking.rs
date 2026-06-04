@@ -175,18 +175,29 @@ fn path_keyword_boost(file_path: &Path, normalized_path: &str, terms: &[String])
 fn path_penalty(normalized_path: &str) -> f32 {
     let path = normalized_path.to_lowercase();
     let mut penalty = 1.0;
-    if path.contains("/tests/")
+    if path.starts_with("tests/")
+        || path.contains("/tests/")
+        || path.starts_with("test/")
         || path.contains("/test/")
         || path.contains("_test.")
+        || path.starts_with("spec/")
         || path.contains("/spec/")
         || path.contains("_spec.")
     {
         penalty *= 0.82;
     }
-    if path.contains("/examples/") || path.contains("/docs/") {
+    if path.starts_with("examples/")
+        || path.contains("/examples/")
+        || path.starts_with("docs/")
+        || path.contains("/docs/")
+    {
         penalty *= 0.88;
     }
-    if path.contains("/legacy/") || path.contains("/compat/") {
+    if path.starts_with("legacy/")
+        || path.contains("/legacy/")
+        || path.starts_with("compat/")
+        || path.contains("/compat/")
+    {
         penalty *= 0.78;
     }
     if path.ends_with("__init__.py")
