@@ -1,3 +1,13 @@
+//! Hybrid ranking and code-aware reranking.
+//!
+//! Retrieval starts with dense semantic candidates and sparse BM25 candidates,
+//! fuses their ranks with reciprocal rank fusion, then applies Semble-style
+//! code-specific adjustments. Symbol-like queries lean more on sparse matching
+//! because exact identifiers matter; natural-language queries keep semantic and
+//! sparse signals balanced. The final penalties bias results toward production
+//! code while still allowing tests/docs/examples to appear when their relevance
+//! is strong.
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -8,6 +18,10 @@ use crate::types::{SearchFilters, SearchResult};
 const RRF_K: f32 = 60.0;
 const CANDIDATE_MULTIPLIER: usize = 5;
 
+/// Runs hybrid ranking for a query and returns the final top_k chunks.
+///
+/// Both retrieval channels intentionally over-fetch so reranking can correct for
+/// path relevance, symbol definitions, and repeated file hits before truncation.
 pub fn rank_search(
     index: &SearchIndex,
     query: &str,
@@ -31,14 +45,21 @@ pub fn rank_search(
     rerank(index, query, scores, top_k)
 }
 
+/// Chooses the dense/sparse mixture for the query shape.
 fn resolve_alpha(query: &str) -> f32 {
     if is_symbol_query(query) { 0.3 } else { 0.5 }
 }
 
+/// Standard RRF contribution for a zero-based rank.
 fn reciprocal_rank(rank: usize) -> f32 {
     1.0 / (RRF_K + rank as f32 + 1.0)
 }
 
+/// Applies code-aware boosts and penalties after dense/sparse fusion.
+///
+/// This stage is multiplicative so BM25 and semantic order still dominate, but
+/// obvious code-search signals can break close ties: symbol definitions, file
+/// stem/path matches, and production-code preference.
 fn rerank(
     index: &SearchIndex,
     query: &str,
@@ -87,6 +108,8 @@ fn rerank(
     });
 
     let mut seen_per_file = HashMap::<String, usize>::new();
+    // Saturation prevents one file with many adjacent chunks from crowding out
+    // other relevant files while preserving deterministic ordering within ties.
     let mut saturated = candidates
         .into_iter()
         .filter_map(|(chunk_id, score)| {
@@ -112,10 +135,12 @@ fn rerank(
     saturated
 }
 
+/// Gives a small lift when independent chunks from the same file agree.
 fn multi_chunk_file_boost(count: usize) -> f32 {
     1.0 + count.saturating_sub(1).min(3) as f32 * 0.08
 }
 
+/// Detects simple language-agnostic definition patterns for symbol queries.
 fn contains_symbol_definition(content: &str, symbol: &str) -> bool {
     if symbol.is_empty() {
         return false;
@@ -128,6 +153,7 @@ fn contains_symbol_definition(content: &str, symbol: &str) -> bool {
     .any(|keyword| content.contains(&format!("{keyword} {symbol}")))
 }
 
+/// Rewards query terms that appear in the file stem or recent path context.
 fn path_keyword_boost(file_path: &Path, normalized_path: &str, terms: &[String]) -> f32 {
     if terms.is_empty() {
         return 1.0;
@@ -142,6 +168,10 @@ fn path_keyword_boost(file_path: &Path, normalized_path: &str, terms: &[String])
     boost.min(1.25)
 }
 
+/// Penalizes paths that are usually less central than production source.
+///
+/// The penalties are soft so a test/doc/compat chunk can still win when the
+/// retrieval signals are much stronger than nearby production-code candidates.
 fn path_penalty(normalized_path: &str) -> f32 {
     let path = normalized_path.to_lowercase();
     let mut penalty = 1.0;
@@ -174,7 +204,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use crate::cache::{CachedFileRecord, CachedIndex, CachedIndexPayloadV3, content_hash};
+    use crate::cache::{CachedFileRecord, CachedIndex, CachedIndexPayloadV4, content_hash};
     use crate::files::FileManifestEntry;
     use crate::index::SearchIndex;
     use crate::matrix::EmbeddingMatrix;
@@ -211,7 +241,7 @@ mod tests {
                 )
             })
             .collect();
-        let payload = CachedIndexPayloadV3::new(
+        let payload = CachedIndexPayloadV4::new(
             PathBuf::from("/repo"),
             ContentFilter::Code,
             "test".to_string(),

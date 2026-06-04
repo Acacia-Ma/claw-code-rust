@@ -1,3 +1,13 @@
+//! Disk cache format for code-search indexes.
+//!
+//! The cache is deliberately disposable: old versions, malformed metadata, or a
+//! missing binary vector sidecar are treated as cache misses instead of being
+//! repaired in place. Metadata stays in JSON so it remains easy to inspect while
+//! dense vectors live in a row-major little-endian f32 file to avoid large, slow
+//! JSON arrays. Every file record stores a range into that flat matrix, so loads
+//! must validate both the metadata shape and the binary row count before the
+//! index can trust any cached chunk id.
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -7,18 +17,25 @@ use crate::files::FileManifestEntry;
 use crate::matrix::EmbeddingMatrix;
 use crate::types::{Chunk, CodeSearchError, ContentFilter};
 
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
+const CHUNKER_VERSION: u32 = 2;
 const F32_BYTES: usize = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CachedIndex {
-    pub payload: CachedIndexPayloadV3,
+    pub payload: CachedIndexPayloadV4,
     pub embeddings: EmbeddingMatrix,
 }
 
+/// JSON metadata for the current cache layout.
+///
+/// The version is bumped whenever the on-disk interpretation changes. There is
+/// no migration path because rebuilding from the workspace is simpler and safer
+/// than preserving stale semantic vectors.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CachedIndexPayloadV3 {
+pub struct CachedIndexPayloadV4 {
     pub cache_version: u32,
+    pub chunker_version: u32,
     pub root: PathBuf,
     pub content: ContentFilter,
     pub model_id: String,
@@ -28,7 +45,12 @@ pub struct CachedIndexPayloadV3 {
     pub files: Vec<CachedFileRecord>,
 }
 
-impl CachedIndexPayloadV3 {
+impl CachedIndexPayloadV4 {
+    /// Creates metadata tied to the supplied flat embedding matrix.
+    ///
+    /// File records must already point at valid matrix row ranges; construction
+    /// keeps the caller responsible for ordering so refresh can rebuild row ids
+    /// deterministically after files are added or deleted.
     pub fn new(
         root: PathBuf,
         content: ContentFilter,
@@ -38,6 +60,7 @@ impl CachedIndexPayloadV3 {
     ) -> Self {
         Self {
             cache_version: CACHE_VERSION,
+            chunker_version: CHUNKER_VERSION,
             root,
             content,
             model_id,
@@ -48,8 +71,14 @@ impl CachedIndexPayloadV3 {
         }
     }
 
+    /// Checks whether cached metadata is usable for a requested index.
+    ///
+    /// Root, content filter, and model id are part of the identity because any
+    /// mismatch would make either the chunk set or the vector space incompatible
+    /// with the current query.
     pub fn is_valid_for(&self, root: &Path, content: ContentFilter, model_id: &str) -> bool {
         self.cache_version == CACHE_VERSION
+            && self.chunker_version == CHUNKER_VERSION
             && self.root == root
             && self.content == content
             && self.model_id == model_id
@@ -57,14 +86,20 @@ impl CachedIndexPayloadV3 {
             && self.is_internally_consistent()
     }
 
+    /// Validates metadata after the binary vector sidecar has been read.
+    ///
+    /// This second-stage check prevents a JSON payload from claiming row ranges
+    /// that the sidecar cannot satisfy.
     fn is_loadable_with(&self, embeddings: &EmbeddingMatrix) -> bool {
         self.cache_version == CACHE_VERSION
+            && self.chunker_version == CHUNKER_VERSION
             && self.embedding_format == EmbeddingFormat::F32LittleEndian
             && self.embedding_dimensions == embeddings.dimensions()
             && self.embedding_rows == embeddings.row_count()
             && self.is_internally_consistent()
     }
 
+    /// Verifies record-local ranges without reading vector contents.
     fn is_internally_consistent(&self) -> bool {
         self.files.iter().all(|record| {
             record.is_consistent()
@@ -76,12 +111,22 @@ impl CachedIndexPayloadV3 {
     }
 }
 
+/// Binary vector encoding used by the sidecar file.
+///
+/// Keeping this explicit lets a future f16 or quantized cache reject old files
+/// cleanly without guessing from byte length.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EmbeddingFormat {
     F32LittleEndian,
 }
 
+/// Per-file cache entry used for incremental refresh.
+///
+/// The manifest is the cheap reuse key, while the content hash records what was
+/// actually chunked. `embedding_start..embedding_start + embedding_count` must
+/// line up with `chunks`; zero-chunk records are valid for empty or unreadable
+/// files and can be reused until their manifest changes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CachedFileRecord {
     pub manifest: FileManifestEntry,
@@ -92,6 +137,7 @@ pub struct CachedFileRecord {
 }
 
 impl CachedFileRecord {
+    /// Builds a record after chunking and embedding have assigned matrix rows.
     pub fn new(
         manifest: FileManifestEntry,
         content_hash: String,
@@ -108,15 +154,22 @@ impl CachedFileRecord {
         }
     }
 
+    /// Returns true when a current manifest can reuse this file record.
+    ///
+    /// Size and nanosecond mtime are the fast path. If either changes, refresh
+    /// re-reads the file so only that file pays chunking and embedding cost.
     pub fn can_reuse_for(&self, manifest: &FileManifestEntry) -> bool {
         &self.manifest == manifest && self.is_consistent()
     }
 
+    /// Checks the row-count invariant that makes file-local cache records safe
+    /// to flatten into the search index.
     fn is_consistent(&self) -> bool {
         self.chunks.len() == self.embedding_count
     }
 }
 
+/// Returns the default persistent cache directory for code-search indexes.
 pub fn default_cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -125,6 +178,7 @@ pub fn default_cache_dir() -> PathBuf {
         .join("indexes")
 }
 
+/// Derives the JSON metadata path for an index identity.
 pub fn cache_file_path(
     cache_dir: &Path,
     root: &Path,
@@ -134,13 +188,19 @@ pub fn cache_file_path(
     cache_dir.join(format!("{}.json", cache_key(root, content, model_id)))
 }
 
+/// Returns the binary vector sidecar path for a metadata file.
 pub fn embedding_file_path(metadata_path: &Path) -> PathBuf {
     metadata_path.with_extension("embeddings.f32")
 }
 
+/// Loads a cached index, returning `None` for any stale or partial cache.
+///
+/// Cache failures intentionally do not surface as user-visible errors because
+/// the cache is an optimization. The service can rebuild the index from source
+/// files when the JSON, version, row ranges, or binary sidecar do not validate.
 pub fn load_payload(path: &Path) -> Option<CachedIndex> {
     let bytes = std::fs::read(path).ok()?;
-    let payload = serde_json::from_slice::<CachedIndexPayloadV3>(&bytes).ok()?;
+    let payload = serde_json::from_slice::<CachedIndexPayloadV4>(&bytes).ok()?;
     let embeddings = read_embeddings(&embedding_file_path(path), &payload)?;
     payload
         .is_loadable_with(&embeddings)
@@ -150,9 +210,14 @@ pub fn load_payload(path: &Path) -> Option<CachedIndex> {
         })
 }
 
+/// Saves cache metadata and row-major embeddings for a completed refresh.
+///
+/// The binary sidecar is written before JSON metadata. If the process dies
+/// between writes, the old or malformed JSON path becomes a miss instead of
+/// advertising rows that have not reached disk.
 pub fn save_payload(
     path: &Path,
-    payload: &CachedIndexPayloadV3,
+    payload: &CachedIndexPayloadV4,
     embeddings: &EmbeddingMatrix,
 ) -> Result<(), CodeSearchError> {
     if let Some(parent) = path.parent() {
@@ -166,15 +231,18 @@ pub fn save_payload(
     Ok(())
 }
 
+/// Hashes file text so cache records can describe what was chunked.
 pub fn content_hash(text: &str) -> String {
     hex_sha256(text.as_bytes())
 }
 
 fn validate_payload_embeddings(
-    payload: &CachedIndexPayloadV3,
+    payload: &CachedIndexPayloadV4,
     embeddings: &EmbeddingMatrix,
 ) -> Result<(), CodeSearchError> {
-    if payload.embedding_dimensions != embeddings.dimensions()
+    if payload.cache_version != CACHE_VERSION
+        || payload.chunker_version != CHUNKER_VERSION
+        || payload.embedding_dimensions != embeddings.dimensions()
         || payload.embedding_rows != embeddings.row_count()
         || !payload.is_internally_consistent()
     {
@@ -185,7 +253,7 @@ fn validate_payload_embeddings(
     Ok(())
 }
 
-fn read_embeddings(path: &Path, payload: &CachedIndexPayloadV3) -> Option<EmbeddingMatrix> {
+fn read_embeddings(path: &Path, payload: &CachedIndexPayloadV4) -> Option<EmbeddingMatrix> {
     let bytes = std::fs::read(path).ok()?;
     let expected_bytes = payload
         .embedding_rows
@@ -259,7 +327,7 @@ mod tests {
             0,
             1,
         );
-        let payload = CachedIndexPayloadV3::new(
+        let payload = CachedIndexPayloadV4::new(
             PathBuf::from("/repo"),
             ContentFilter::Code,
             "model-a".to_string(),
@@ -273,11 +341,13 @@ mod tests {
     }
 
     /// Trace: L2-DES-TOOL-001
-    /// Verifies: v3 cache metadata validates model, content filter, and embedding ranges.
+    /// Verifies: v4 cache metadata validates model, chunker, content filter, and embedding ranges.
     #[test]
     fn cached_payload_validates_header_and_records() {
         let cached = cached_index();
 
+        let mut wrong_chunker = cached.payload.clone();
+        wrong_chunker.chunker_version = 1;
         let validity = vec![
             cached
                 .payload
@@ -285,9 +355,10 @@ mod tests {
             cached
                 .payload
                 .is_valid_for(Path::new("/repo"), ContentFilter::Code, "model-b"),
+            wrong_chunker.is_valid_for(Path::new("/repo"), ContentFilter::Code, "model-a"),
         ];
 
-        assert_eq!(validity, vec![true, false]);
+        assert_eq!(validity, vec![true, false, false]);
     }
 
     /// Trace: L2-DES-TOOL-001
@@ -304,27 +375,38 @@ mod tests {
         let loaded = load_payload(&path);
 
         assert_eq!(json.contains("embeddings"), false);
+        assert_eq!(json.contains("\"chunker_version\":2"), true);
         assert_eq!(embedding_bytes.len(), 8);
         assert_eq!(loaded, Some(cached));
     }
 
     /// Trace: L2-DES-TOOL-001
-    /// Verifies: stale v1/v2 and malformed cache files are treated as disposable cache misses.
+    /// Verifies: stale v1/v2/v3 and malformed cache files are treated as disposable cache misses.
     #[test]
     fn load_payload_rejects_stale_and_malformed_cache_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let v2_path = temp.path().join("v2.json");
+        let v3_path = temp.path().join("v3.json");
         let malformed_path = temp.path().join("malformed.json");
         fs::write(
             &v2_path,
             r#"{"cache_version":2,"root":"/repo","content":"code","model_id":"test","files":[]}"#,
         )
         .expect("write v2");
+        fs::write(
+            &v3_path,
+            r#"{"cache_version":3,"root":"/repo","content":"code","model_id":"test","embedding_format":"f32_little_endian","embedding_dimensions":0,"embedding_rows":0,"files":[]}"#,
+        )
+        .expect("write v3");
         fs::write(&malformed_path, b"{").expect("write malformed");
 
-        let loaded = vec![load_payload(&v2_path), load_payload(&malformed_path)];
+        let loaded = vec![
+            load_payload(&v2_path),
+            load_payload(&v3_path),
+            load_payload(&malformed_path),
+        ];
 
-        assert_eq!(loaded, vec![None, None]);
+        assert_eq!(loaded, vec![None, None, None]);
     }
 
     /// Trace: L2-DES-TOOL-001
@@ -355,5 +437,24 @@ mod tests {
             vec![missing, truncated, wrong_dimensions],
             vec![None, None, None]
         );
+    }
+
+    /// Trace: L2-DES-TOOL-001
+    /// Verifies: v4 cache payloads require the current chunker version.
+    #[test]
+    fn load_payload_rejects_wrong_chunker_version() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("index.json");
+        let cached = cached_index();
+        save_payload(&path, &cached.payload, &cached.embeddings).expect("save");
+        let mut json =
+            serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&path).expect("json"))
+                .expect("json value");
+        json["chunker_version"] = serde_json::json!(1);
+        fs::write(&path, serde_json::to_vec(&json).expect("json bytes")).expect("write json");
+
+        let loaded = load_payload(&path);
+
+        assert_eq!(loaded, None);
     }
 }

@@ -1,9 +1,18 @@
+//! Incremental index refresh.
+//!
+//! Refresh compares the current file manifest with a previous cache and only
+//! re-reads, re-chunks, and re-embeds files whose path, size, or nanosecond mtime
+//! changed. The output is still a complete cache payload: reused file records are
+//! copied into a new flat embedding matrix so row ids stay dense and stable after
+//! deletes, additions, and record reordering. That keeps the search index simple
+//! and avoids carrying tombstones through ranking.
+
 use std::collections::HashMap;
 use std::path::Path;
 
 use rayon::prelude::*;
 
-use crate::cache::{CachedFileRecord, CachedIndex, CachedIndexPayloadV3, content_hash};
+use crate::cache::{CachedFileRecord, CachedIndex, CachedIndexPayloadV4, content_hash};
 use crate::chunking::chunk_file;
 use crate::dense::EmbeddingProvider;
 use crate::files::{FileEntry, FileManifestEntry, read_indexable_text};
@@ -12,9 +21,21 @@ use crate::types::{Chunk, CodeSearchError, ContentFilter};
 
 const EMBEDDING_BATCH_SIZE: usize = 256;
 
+/// Rebuilds a complete cache payload from a current file listing and optional
+/// previous cache.
+///
+/// This type is stateless so the service can run refreshes inside blocking work
+/// without hidden cross-query state. All reuse decisions are derived from the
+/// supplied manifests and provider identity.
 pub struct IndexRefresh;
 
 impl IndexRefresh {
+    /// Performs a manifest-aware refresh and returns a complete cache image.
+    ///
+    /// A previous cache is accepted only when root, content filter, cache
+    /// version, and model id match. Changed files are read/chunked in parallel,
+    /// their chunks are embedded in bounded batches, and unchanged rows are
+    /// copied from the old matrix into the new matrix in final record order.
     pub fn refresh(
         root: &Path,
         content: ContentFilter,
@@ -60,6 +81,9 @@ impl IndexRefresh {
         }
 
         let deleted_files = previous_records.len();
+        // Reading and chunking are CPU/file-system bound and independent per
+        // file. Embedding stays batched after this stage so provider calls remain
+        // predictable and do not explode into one request per changed chunk.
         let mut pending_records = pending_files
             .into_par_iter()
             .map(|(slot_idx, file)| PendingFileRecord::read(file).map(|record| (slot_idx, record)))
@@ -86,6 +110,9 @@ impl IndexRefresh {
         for (slot_idx, slot) in slots.into_iter().enumerate() {
             match slot {
                 RefreshSlot::Reused(record) => {
+                    // Reused rows are copied into the new matrix instead of
+                    // keeping old row ids. Deleted files then disappear
+                    // completely, and chunk id == embedding row remains true.
                     let embedding_start = embeddings.row_count();
                     embeddings.extend_rows_from(
                         &previous_embeddings,
@@ -101,6 +128,9 @@ impl IndexRefresh {
                     ));
                 }
                 RefreshSlot::Pending => {
+                    // Zero-chunk pending records are valid: empty and unreadable
+                    // files still get manifests so the refresh can skip them
+                    // until the file metadata changes.
                     let pending = pending_by_slot.get(&slot_idx).ok_or_else(|| {
                         CodeSearchError::Index("missing pending file record".to_string())
                     })?;
@@ -123,7 +153,7 @@ impl IndexRefresh {
         }
 
         records.sort_by(|left, right| left.manifest.path.cmp(&right.manifest.path));
-        let payload = CachedIndexPayloadV3::new(
+        let payload = CachedIndexPayloadV4::new(
             root.to_path_buf(),
             content,
             provider.model_id().to_string(),
@@ -140,9 +170,13 @@ impl IndexRefresh {
     }
 }
 
+/// Result of an incremental refresh.
+///
+/// The counters are diagnostic only; callers should use `payload` and
+/// `embeddings` as the canonical cache image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefreshOutcome {
-    pub payload: CachedIndexPayloadV3,
+    pub payload: CachedIndexPayloadV4,
     pub embeddings: EmbeddingMatrix,
     pub reused_files: usize,
     pub reembedded_files: usize,
@@ -154,6 +188,7 @@ enum RefreshSlot {
     Pending,
 }
 
+/// File data that must be embedded before it can become a cache record.
 #[derive(Clone)]
 struct PendingFileRecord {
     manifest: FileManifestEntry,
@@ -162,6 +197,12 @@ struct PendingFileRecord {
 }
 
 impl PendingFileRecord {
+    /// Reads a changed file and converts read failures into reusable zero-chunk
+    /// records.
+    ///
+    /// Code search should not fail a whole repository because one candidate file
+    /// disappears or becomes unreadable during indexing. A later manifest change
+    /// will retry the file.
     fn read(file: FileEntry) -> Result<Self, CodeSearchError> {
         let (content_hash_value, chunks) = match read_indexable_text(&file.absolute_path) {
             Ok(Some(text)) => (
@@ -179,6 +220,11 @@ impl PendingFileRecord {
     }
 }
 
+/// Embeds changed chunk text in bounded provider calls.
+///
+/// Providers must return one vector per input chunk. The explicit count check
+/// catches model/runtime bugs before the flattened matrix can drift out of sync
+/// with chunk ids.
 fn embed_in_batches(
     provider: &dyn EmbeddingProvider,
     texts: &[String],
@@ -302,7 +348,7 @@ mod tests {
     }
 
     /// Trace: L2-DES-TOOL-001
-    /// Verifies: adding and deleting files updates the v3 payload and flattened search index.
+    /// Verifies: adding and deleting files updates the v4 payload and flattened search index.
     #[test]
     fn added_and_deleted_files_update_flattened_index() {
         let temp = tempfile::tempdir().expect("tempdir");

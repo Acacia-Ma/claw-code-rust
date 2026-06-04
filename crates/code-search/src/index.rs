@@ -1,3 +1,12 @@
+//! In-memory searchable index.
+//!
+//! `SearchIndex` is the flattened runtime view produced from cache records: one
+//! chunk id corresponds to one embedding matrix row and one BM25 document id.
+//! Keeping those ids identical is the main invariant that lets ranking combine
+//! sparse and dense results without translation tables. Large unfiltered semantic
+//! searches may use HNSW for candidate generation, but exact cosine scores are
+//! recomputed before ranking so the public behavior remains stable.
+
 use std::path::{Path, PathBuf};
 
 use bm25::{Document, SearchEngine, SearchEngineBuilder, Tokenizer};
@@ -22,11 +31,20 @@ use crate::types::{
 pub struct CodeTokenizer;
 
 impl Tokenizer for CodeTokenizer {
+    /// Tokenizes code with identifier-aware splitting for BM25.
+    ///
+    /// The sparse index needs `parse_input`, `ParseInput`, and `parse input` to
+    /// meet in the same token space, which is why this delegates to the Semble
+    /// style identifier splitter instead of natural-language tokenization.
     fn tokenize(&self, input_text: &str) -> Vec<String> {
         split_identifier_tokens(input_text)
     }
 }
 
+/// Runtime index used by search and find-related operations.
+///
+/// The manifest is retained for warm-cache validation, while chunks, embeddings,
+/// sparse BM25 state, and semantic candidate state are all aligned by chunk id.
 pub struct SearchIndex {
     root: PathBuf,
     content: ContentFilter,
@@ -40,6 +58,7 @@ pub struct SearchIndex {
 
 impl SearchIndex {
     #[cfg(test)]
+    /// Builds an index directly from file entries for tests.
     pub fn build(
         root: PathBuf,
         content: ContentFilter,
@@ -54,6 +73,11 @@ impl SearchIndex {
         })
     }
 
+    /// Builds the runtime index from a complete cached payload.
+    ///
+    /// Cache records can arrive grouped by file with row ranges into the cached
+    /// matrix. This method flattens them into chunk order and copies the rows so
+    /// runtime row ids are dense even after incremental refresh dropped files.
     pub fn from_cached(cached: CachedIndex) -> Result<Self, CodeSearchError> {
         let indexed_files = cached.payload.files.len();
         let mut manifest = Vec::new();
@@ -83,22 +107,30 @@ impl SearchIndex {
         )
     }
 
+    /// Returns stable output statistics for the tool response.
     pub fn stats(&self) -> IndexStats {
         self.stats.clone()
     }
 
+    /// Returns the canonical root used to build this index.
     pub fn root(&self) -> &Path {
         &self.root
     }
 
+    /// Returns the content filter baked into this index.
     pub fn content(&self) -> ContentFilter {
         self.content
     }
 
+    /// Checks whether an in-memory index still matches the current file set.
+    ///
+    /// The service only calls this after a manifest walk; a clean watcher can
+    /// skip that walk for a short safety window.
     pub fn manifest_matches(&self, manifest: &[FileManifestEntry]) -> bool {
         self.manifest == manifest
     }
 
+    /// Returns a chunk by the shared chunk/embedding/BM25 id.
     pub fn chunk(&self, chunk_id: usize) -> Option<&Chunk> {
         self.chunks.get(chunk_id)
     }
@@ -108,6 +140,11 @@ impl SearchIndex {
         self.semantic.is_hnsw()
     }
 
+    /// Runs dense semantic retrieval and returns exact cosine scores.
+    ///
+    /// HNSW is used only when there are no path or language filters. Filtered
+    /// searches scan exactly so ANN recall cannot silently omit an allowed chunk
+    /// before the filter is applied.
     pub fn semantic_search(
         &self,
         query_embedding: &[f32],
@@ -125,6 +162,8 @@ impl SearchIndex {
             Some(ids) => ids
                 .into_iter()
                 .filter_map(|idx| {
+                    // ANN returns ids only; exact cosine is recomputed here so
+                    // ranking sees the same score scale as the full-scan path.
                     let embedding = self.embeddings.row(idx)?;
                     Some((idx, cosine_similarity(query_embedding, embedding)))
                 })
@@ -153,6 +192,7 @@ impl SearchIndex {
         scores
     }
 
+    /// Runs BM25 sparse retrieval over enriched code chunks.
     pub fn sparse_search(
         &self,
         query: &str,
@@ -172,6 +212,11 @@ impl SearchIndex {
             .collect()
     }
 
+    /// Finds chunks semantically related to a source chunk.
+    ///
+    /// This path intentionally stays exact and same-language. `find_related` is
+    /// usually scoped around a concrete code location, so predictable exclusion
+    /// of the source chunk and language locality matter more than ANN latency.
     pub fn related_by_embedding(
         &self,
         source_idx: usize,
@@ -209,6 +254,10 @@ impl SearchIndex {
         results
     }
 
+    /// Locates the chunk that contains a 1-indexed source line.
+    ///
+    /// Paths are normalized with `/` separators so workspace-relative paths from
+    /// tool input match cached paths on Windows and Unix.
     pub fn find_source_chunk(&self, file_path: &Path, line: usize) -> Option<usize> {
         let normalized = file_path.to_string_lossy().replace('\\', "/");
         self.chunks.iter().position(|chunk| {
@@ -218,6 +267,7 @@ impl SearchIndex {
         })
     }
 
+    /// Constructs all runtime search structures from already-flattened pieces.
     fn from_parts(
         root: PathBuf,
         content: ContentFilter,
@@ -250,6 +300,7 @@ impl SearchIndex {
     }
 }
 
+/// Builds the sparse search engine with file/path enrichment.
 fn build_bm25(chunks: &[Chunk]) -> SearchEngine<usize, u32, CodeTokenizer> {
     let documents = chunks
         .iter()
@@ -270,7 +321,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use crate::cache::{CachedFileRecord, CachedIndexPayloadV3, content_hash};
+    use crate::cache::{CachedFileRecord, CachedIndexPayloadV4, content_hash};
     use crate::dense::HashEmbeddingProvider;
     use crate::files::discover_files;
 
@@ -315,7 +366,7 @@ mod tests {
             language: "rust".to_string(),
         };
         let embeddings = EmbeddingMatrix::from_vectors(vec![vec![1.0]]).expect("matrix");
-        let payload = CachedIndexPayloadV3::new(
+        let payload = CachedIndexPayloadV4::new(
             PathBuf::from("/repo"),
             ContentFilter::Code,
             "test".to_string(),
@@ -435,7 +486,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        let payload = CachedIndexPayloadV3::new(
+        let payload = CachedIndexPayloadV4::new(
             PathBuf::from("/repo"),
             ContentFilter::Code,
             "test".to_string(),

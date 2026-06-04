@@ -1,3 +1,12 @@
+//! Code-search service orchestration.
+//!
+//! The service owns model access, root validation, warm in-memory indexes, disk
+//! cache lookup, incremental refresh, and final tool output construction. Its
+//! refresh ladder is intentionally conservative: a clean watcher can skip the
+//! manifest walk briefly, otherwise the service validates manifests before using
+//! memory or disk cache. This keeps correctness ahead of latency while still
+//! avoiding full repository work on repeated queries.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -17,6 +26,11 @@ use crate::watch::IndexWatcher;
 
 const MANIFEST_SAFETY_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Thread-safe entrypoint used by the Devo tool runtime.
+///
+/// `CodeSearchService` keeps one in-memory index per root/content/model identity.
+/// The service is read-only with respect to the workspace; its only writes are
+/// disposable cache files under the configured cache directory.
 pub struct CodeSearchService {
     provider: Arc<dyn EmbeddingProvider>,
     cache_dir: PathBuf,
@@ -25,6 +39,7 @@ pub struct CodeSearchService {
 }
 
 impl CodeSearchService {
+    /// Creates the production service with the default local model cache.
     pub fn production() -> Self {
         Self::new(
             Arc::new(Model2VecEmbeddingProvider::default()),
@@ -32,6 +47,10 @@ impl CodeSearchService {
         )
     }
 
+    /// Creates a service with explicit provider and cache directory.
+    ///
+    /// Tests use this to substitute deterministic embeddings while the runtime
+    /// uses the model2vec provider.
     pub fn new(provider: Arc<dyn EmbeddingProvider>, cache_dir: PathBuf) -> Self {
         Self {
             provider,
@@ -55,6 +74,10 @@ impl CodeSearchService {
         }
     }
 
+    /// Executes a hybrid code search and returns the stable tool response shape.
+    ///
+    /// Empty queries are handled before model/index work so validation callers can
+    /// receive a cheap empty result instead of triggering model downloads.
     pub fn search(&self, request: SearchRequest) -> Result<SearchOutput, CodeSearchError> {
         let top_k = validate_top_k(request.top_k)?;
         let root = canonical_root(&request.root)?;
@@ -88,6 +111,11 @@ impl CodeSearchService {
         })
     }
 
+    /// Finds chunks related to a source file line.
+    ///
+    /// The source location is resolved against the same root and filters used by
+    /// search. Missing source chunks are not errors because generated or ignored
+    /// files may legitimately be outside the index.
     pub fn find_related(&self, request: RelatedRequest) -> Result<SearchOutput, CodeSearchError> {
         let top_k = validate_top_k(request.top_k)?;
         if request.line == 0 {
@@ -112,6 +140,11 @@ impl CodeSearchService {
         })
     }
 
+    /// Returns a warm or refreshed index for a root/content pair.
+    ///
+    /// The fast path is a clean watcher inside the safety interval. If that does
+    /// not hold, the service performs a manifest walk, checks memory, checks disk,
+    /// then asks `IndexRefresh` to reuse or re-embed at file granularity.
     fn index(
         &self,
         root: PathBuf,
@@ -122,6 +155,9 @@ impl CodeSearchService {
             return Ok(index);
         }
 
+        // A watcher-clean index is an optimization only. Once the watcher is
+        // dirty, unavailable, or beyond the safety interval, the manifest walk is
+        // the source of truth for reuse decisions.
         let files = discover_files(&root, content)?;
         let manifest = files
             .iter()
@@ -153,6 +189,8 @@ impl CodeSearchService {
         Ok(index)
     }
 
+    /// Reuses an in-memory index without touching the filesystem when watcher
+    /// state says it is both available and clean.
     fn clean_warm_index(&self, key: &str) -> Result<Option<Arc<SearchIndex>>, CodeSearchError> {
         let now = Instant::now();
         Ok(self
@@ -164,6 +202,10 @@ impl CodeSearchService {
             .map(|state| Arc::clone(&state.index)))
     }
 
+    /// Reuses an in-memory index after a manifest walk proves it is still fresh.
+    ///
+    /// Storing it again replaces the watcher and updates the safety timestamp so
+    /// future clean queries can take the no-walk path.
     fn matching_memory_index(
         &self,
         key: &str,
@@ -184,6 +226,7 @@ impl CodeSearchService {
         Ok(None)
     }
 
+    /// Installs an index in the warm cache with a watcher for its root.
     fn store_index(
         &self,
         key: String,
@@ -205,6 +248,7 @@ impl Default for CodeSearchService {
     }
 }
 
+/// Canonicalizes and validates the requested search root.
 fn canonical_root(root: &Path) -> Result<PathBuf, CodeSearchError> {
     let canonical = root.canonicalize()?;
     if !canonical.is_dir() {
@@ -216,6 +260,8 @@ fn canonical_root(root: &Path) -> Result<PathBuf, CodeSearchError> {
     Ok(canonical)
 }
 
+/// Converts an absolute source path into the workspace-relative path stored in
+/// chunks and rejects absolute paths outside the root.
 fn normalize_source_path(root: &Path, file_path: &Path) -> Result<PathBuf, CodeSearchError> {
     if file_path.is_absolute() {
         let canonical = file_path.canonicalize()?;
@@ -232,10 +278,12 @@ fn normalize_source_path(root: &Path, file_path: &Path) -> Result<PathBuf, CodeS
     Ok(file_path.to_path_buf())
 }
 
+/// Builds the in-memory index key from the dimensions that affect retrieval.
 fn memory_key(root: &Path, content: ContentFilter, model_id: &str) -> String {
     format!("{}::{content:?}::{model_id}", root.display())
 }
 
+/// Warm index state plus the invalidation signal for its workspace root.
 struct CachedIndexState {
     index: Arc<SearchIndex>,
     watcher: IndexWatcher,
@@ -243,6 +291,7 @@ struct CachedIndexState {
 }
 
 impl CachedIndexState {
+    /// Creates a warm state and starts a watcher when policy allows it.
     fn new(index: Arc<SearchIndex>, root: &Path, watcher_policy: WatcherPolicy) -> Self {
         Self {
             index,
@@ -251,12 +300,15 @@ impl CachedIndexState {
         }
     }
 
+    /// Returns true only when skipping discovery is still within the correctness
+    /// budget: watcher available, no events seen, and safety interval not stale.
     fn can_reuse_without_manifest(&self, now: Instant, safety_interval: Duration) -> bool {
         self.watcher.can_skip_manifest_check()
             && now.duration_since(self.last_manifest_check) < safety_interval
     }
 }
 
+/// Test seam for watcher setup failure without mutating global environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WatcherPolicy {
     Enabled,
@@ -265,6 +317,7 @@ enum WatcherPolicy {
 }
 
 impl WatcherPolicy {
+    /// Creates the watcher required by the selected policy.
     fn create_watcher(self, root: &Path) -> IndexWatcher {
         match self {
             Self::Enabled => IndexWatcher::watch(root),
@@ -280,7 +333,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use crate::cache::{CachedIndex, CachedIndexPayloadV3, cache_file_path, load_payload};
+    use crate::cache::{CachedIndex, CachedIndexPayloadV4, cache_file_path, load_payload};
     use crate::dense::HashEmbeddingProvider;
     use crate::matrix::EmbeddingMatrix;
     use crate::types::SearchFilters;
@@ -476,7 +529,7 @@ mod tests {
     }
 
     /// Trace: L2-DES-TOOL-001
-    /// Verifies: stale v1 cache payloads are ignored and replaced by a v2 cache payload.
+    /// Verifies: stale v1 cache payloads are ignored and replaced by a v4 cache payload.
     #[test]
     fn stale_v1_cache_rebuilds_cleanly() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -508,7 +561,7 @@ mod tests {
 
     fn empty_index() -> Arc<SearchIndex> {
         let embeddings = EmbeddingMatrix::empty();
-        let payload = CachedIndexPayloadV3::new(
+        let payload = CachedIndexPayloadV4::new(
             PathBuf::from("/repo"),
             ContentFilter::Code,
             "test".to_string(),

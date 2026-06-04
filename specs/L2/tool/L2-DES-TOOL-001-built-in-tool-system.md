@@ -167,6 +167,7 @@ The semantic retrieval tool should:
 - Support content filters for code, docs, config, and all indexed non-data text.
 - Return bounded structured JSON results containing score, workspace-relative file path, line range, language, and chunk content.
 - Use workspace search permissions and remain eligible for parallel read-only execution.
+- Chunk supported programming and structured config languages with tree-sitter AST boundaries, while using line-based fallback for docs, data, unsupported language labels, parser errors, or empty AST output.
 - Cache indexes locally when possible, while invalidating them when the indexed file manifest, content mode, or embedding model changes.
 - Refresh cached indexes incrementally when possible, re-embedding changed files while reusing unchanged file records, and use watcher-backed warm reuse only when the watched root is clean and within a bounded safety interval.
 - Store local vector cache data in compact binary form where practical, and use approximate nearest-neighbor candidate search plus exact reranking for large semantic indexes while preserving exact fallbacks for filtered or small searches.
@@ -408,3 +409,4 @@ Live server-client events may be more frequent than durable records, but replay 
 | 1 | 2026-06-04 | Assistant | Refinement | Added read-only semantic code retrieval as a workspace search capability with structured output, model-unavailable behavior, and cache invalidation expectations. |
 | 1 | 2026-06-04 | Assistant | Refinement | Clarified semantic code retrieval cache refresh as incremental per-file re-embedding with watcher-backed warm reuse bounded by a safety interval. |
 | 1 | 2026-06-04 | Assistant | Refinement | Clarified semantic code retrieval performance internals for binary vector cache storage, ANN candidate search with exact reranking, and exact fallbacks. |
+| 1 | 2026-06-04 | Assistant | Refinement | Clarified semantic code retrieval chunking as tree-sitter AST chunking for supported programming/config languages with line fallback for docs, data, unsupported labels, and parser failures. |

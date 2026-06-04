@@ -1,3 +1,11 @@
+//! Filesystem watcher state for warm index reuse.
+//!
+//! The watcher is intentionally coarse: any filesystem event under the indexed
+//! root marks the warm index dirty. The service never tries to interpret events;
+//! it simply falls back to manifest discovery when the flag is dirty, stale, or
+//! unavailable. That makes watcher clean state a latency optimization, not a
+//! correctness requirement.
+
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,10 +27,20 @@ pub struct IndexWatcher {
 }
 
 impl IndexWatcher {
+    /// Starts a recursive watcher or returns an unavailable watcher on failure.
+    ///
+    /// Watch setup failure is expected on some platforms or filesystems, so the
+    /// caller should continue with manifest checks instead of treating it as a
+    /// hard indexing failure.
     pub fn watch(root: &Path) -> Self {
         Self::try_watch(root).unwrap_or_else(|_| Self::unavailable())
     }
 
+    /// Starts a recursive watcher and reports setup errors.
+    ///
+    /// The callback only flips an atomic flag. Refresh creates a new watcher
+    /// rather than clearing the old flag, which avoids races where an event lands
+    /// while a manifest refresh is in flight.
     pub fn try_watch(root: &Path) -> Result<Self, CodeSearchError> {
         let dirty = Arc::new(AtomicBool::new(false));
         let handler_dirty = Arc::clone(&dirty);
@@ -45,6 +63,7 @@ impl IndexWatcher {
         })
     }
 
+    /// Creates a watcher state that can never skip manifest checks.
     pub fn unavailable() -> Self {
         Self {
             dirty: Arc::new(AtomicBool::new(true)),
@@ -53,6 +72,10 @@ impl IndexWatcher {
         }
     }
 
+    /// Returns true when the service may skip a manifest walk.
+    ///
+    /// The service also applies a safety interval; this method only captures the
+    /// watcher-specific part of the decision.
     pub fn can_skip_manifest_check(&self) -> bool {
         self.available && !self.dirty.load(Ordering::SeqCst)
     }

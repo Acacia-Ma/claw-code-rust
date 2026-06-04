@@ -1,3 +1,10 @@
+//! Public request, response, and error types for the code-search crate.
+//!
+//! These types mirror the built-in tool schema: callers choose `search` or
+//! `find_related`, a content filter, a bounded result count, and optional path or
+//! language filters. The JSON-facing response shape is kept stable while the
+//! internals can change cache layout, refresh strategy, or semantic backend.
+
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -5,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_TOP_K: usize = 5;
 pub const MAX_TOP_K: usize = 20;
 
+/// High-level content partition selected by the tool input.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentFilter {
@@ -15,6 +23,10 @@ pub enum ContentFilter {
     All,
 }
 
+/// File classification produced during discovery.
+///
+/// Data files are recognized separately so `all` can still avoid indexing CSV or
+/// similar table data that is usually noisy for code retrieval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentKind {
@@ -25,6 +37,7 @@ pub enum ContentKind {
 }
 
 impl ContentKind {
+    /// Returns whether this content kind belongs in a requested index.
     pub fn is_selected_by(self, filter: ContentFilter) -> bool {
         match filter {
             ContentFilter::Code => self == Self::Code,
@@ -35,6 +48,7 @@ impl ContentKind {
     }
 }
 
+/// Supported code-search operation names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CodeSearchOperation {
@@ -42,6 +56,7 @@ pub enum CodeSearchOperation {
     FindRelated,
 }
 
+/// Searchable source fragment with stable workspace-relative location.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Chunk {
     pub content: String,
@@ -52,6 +67,7 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    /// Formats the chunk location for deterministic tie-breaking and display.
     pub fn location(&self) -> String {
         format!(
             "{}:{}-{}",
@@ -62,18 +78,21 @@ impl Chunk {
     }
 }
 
+/// Ranked result returned by both search operations.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SearchResult {
     pub score: f32,
     pub chunk: Chunk,
 }
 
+/// Index size summary included in every response.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexStats {
     pub indexed_files: usize,
     pub total_chunks: usize,
 }
 
+/// Stable JSON output shape for the built-in tool.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SearchOutput {
     pub operation: CodeSearchOperation,
@@ -85,6 +104,10 @@ pub struct SearchOutput {
     pub index_stats: IndexStats,
 }
 
+/// Optional path and language filters applied before final ranking.
+///
+/// Paths are normalized to `/` separators and matched as exact files or directory
+/// prefixes. Languages are lowercased classification names such as `rust`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchFilters {
     pub paths: Vec<String>,
@@ -92,6 +115,7 @@ pub struct SearchFilters {
 }
 
 impl SearchFilters {
+    /// Creates an unfiltered search scope.
     pub fn empty() -> Self {
         Self {
             paths: Vec::new(),
@@ -99,10 +123,12 @@ impl SearchFilters {
         }
     }
 
+    /// Returns true when no path or language restriction is active.
     pub fn is_empty(&self) -> bool {
         self.paths.is_empty() && self.languages.is_empty()
     }
 
+    /// Normalizes tool input filters into the form used by search.
     pub fn normalized(paths: Vec<String>, languages: Vec<String>) -> Self {
         Self {
             paths: paths
@@ -118,6 +144,7 @@ impl SearchFilters {
         }
     }
 
+    /// Checks whether a chunk survives both path and language filters.
     pub fn allows(&self, chunk: &Chunk) -> bool {
         let path = chunk
             .file_path
@@ -138,6 +165,7 @@ impl SearchFilters {
     }
 }
 
+/// Internal request for the `search` operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchRequest {
     pub root: PathBuf,
@@ -147,6 +175,7 @@ pub struct SearchRequest {
     pub filters: SearchFilters,
 }
 
+/// Internal request for the `find_related` operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelatedRequest {
     pub root: PathBuf,
@@ -157,6 +186,10 @@ pub struct RelatedRequest {
     pub filters: SearchFilters,
 }
 
+/// Error categories surfaced by the code-search service.
+///
+/// Model failures are kept separate from index and input failures so the tool
+/// runtime can report missing local model cache as a recoverable condition.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CodeSearchError {
     #[error("invalid input: {0}")]
@@ -181,6 +214,10 @@ impl From<anyhow::Error> for CodeSearchError {
     }
 }
 
+/// Validates and returns the requested result limit.
+///
+/// The max bound protects retrieval from accidentally building huge candidate
+/// sets through the public tool schema.
 pub fn validate_top_k(top_k: usize) -> Result<usize, CodeSearchError> {
     if top_k == 0 {
         return Err(CodeSearchError::InvalidInput(

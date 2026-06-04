@@ -1,3 +1,11 @@
+//! Workspace file discovery and text loading.
+//!
+//! The walker mirrors Semble's code-search assumptions: obey gitignore and
+//! `.sembleignore`, skip symlinks and heavy generated directories, cap files at
+//! one megabyte, and classify only languages/content types the retriever knows
+//! how to index. Discovery produces a manifest that incremental refresh can use
+//! as a cheap reuse key before any file content is read.
+
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -8,6 +16,11 @@ use crate::types::{CodeSearchError, ContentFilter, ContentKind};
 
 pub const MAX_FILE_BYTES: u64 = 1_000_000;
 
+/// Cheap file identity used for incremental cache reuse.
+///
+/// Path, size, and nanosecond mtime are intentionally the fast path. Content
+/// hashes are recorded after reading, but avoiding reads for unchanged manifests
+/// is what makes warm refreshes scale.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileManifestEntry {
     pub path: PathBuf,
@@ -15,6 +28,7 @@ pub struct FileManifestEntry {
     pub modified_unix_nanos: u128,
 }
 
+/// Discovered file that is eligible for indexing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileEntry {
     pub absolute_path: PathBuf,
@@ -24,6 +38,11 @@ pub struct FileEntry {
     pub manifest: FileManifestEntry,
 }
 
+/// Discovers indexable files under a root for a requested content filter.
+///
+/// Invalid directory entries, unreadable metadata, unknown languages, symlinks,
+/// and oversized files are skipped rather than failing the whole search. Source
+/// repositories often change while indexing, so the walker has to tolerate races.
 pub fn discover_files(
     root: &Path,
     content_filter: ContentFilter,
@@ -90,6 +109,10 @@ pub fn discover_files(
     Ok(files)
 }
 
+/// Reads a file as lossy UTF-8 text for chunking.
+///
+/// Tiny whitespace-only files return `None` so refresh can create a reusable
+/// zero-chunk record without embedding meaningless content.
 pub fn read_indexable_text(path: &Path) -> Result<Option<String>, CodeSearchError> {
     let bytes = std::fs::read(path)?;
     if bytes.len() < 128 && bytes.iter().all(u8::is_ascii_whitespace) {
@@ -98,6 +121,10 @@ pub fn read_indexable_text(path: &Path) -> Result<Option<String>, CodeSearchErro
     Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
+/// Classifies a path into retrieval language and content kind.
+///
+/// Unknown extensions are ignored to keep the index focused on text/code files
+/// and to avoid pulling binary formats into lossy UTF-8 chunking.
 pub fn classify_path(path: &Path) -> Option<(String, ContentKind)> {
     let file_name = path.file_name()?.to_str()?.to_lowercase();
     if file_name == "dockerfile" {

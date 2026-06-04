@@ -1,3 +1,12 @@
+//! Dense embedding providers and vector math.
+//!
+//! Production search uses model2vec with the Semble-compatible
+//! `minishlab/potion-code-16M` model cached under the local Devo cache
+//! directory. Missing model files are fetched on first use; load/download
+//! failures become typed `ModelUnavailable` errors so the tool can report a
+//! recoverable cache/model problem instead of panicking. Tests use a deterministic
+//! hash provider to exercise indexing without network or model dependencies.
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -18,10 +27,17 @@ const MODEL_FILES: [&str; 3] = ["tokenizer.json", "model.safetensors", "config.j
 /// dimensionality stable for the lifetime of a provider, and return normalized or
 /// otherwise cosine-compatible vectors.
 pub trait EmbeddingProvider: Send + Sync {
+    /// Stable model identity used for cache invalidation.
     fn model_id(&self) -> &str;
+    /// Embeds each supplied text into one dense vector.
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, CodeSearchError>;
 }
 
+/// Lazy model2vec provider for production dense retrieval.
+///
+/// The model is loaded behind a mutex on first embedding call. Keeping it lazy
+/// avoids downloading or deserializing model files for validation paths that
+/// return before indexing.
 pub struct Model2VecEmbeddingProvider {
     model_id: String,
     model_dir: PathBuf,
@@ -29,6 +45,7 @@ pub struct Model2VecEmbeddingProvider {
 }
 
 impl Model2VecEmbeddingProvider {
+    /// Creates a provider that uses Devo's default local model cache.
     pub fn default_cached() -> Self {
         let model_dir = default_model_cache_dir();
         Self {
@@ -38,6 +55,10 @@ impl Model2VecEmbeddingProvider {
         }
     }
 
+    /// Ensures required model files exist and loads model2vec state.
+    ///
+    /// `normalize_from_config` is left to the model config so the provider stays
+    /// aligned with upstream model metadata.
     fn load_model(&self) -> Result<Model2Vec, CodeSearchError> {
         ensure_model_files(&self.model_dir)?;
         let normalize_from_config = None;
@@ -79,6 +100,11 @@ impl EmbeddingProvider for Model2VecEmbeddingProvider {
     }
 }
 
+/// Deterministic embedding provider used by tests.
+///
+/// Hash embeddings are not semantically meaningful, but they preserve the core
+/// invariants the index relies on: stable dimensions, one row per text, and
+/// cosine-compatible normalization.
 #[derive(Debug)]
 pub struct HashEmbeddingProvider {
     model_id: String,
@@ -86,6 +112,7 @@ pub struct HashEmbeddingProvider {
 }
 
 impl HashEmbeddingProvider {
+    /// Creates a deterministic provider with a fixed vector dimension.
     pub fn new(model_id: impl Into<String>, dimensions: usize) -> Self {
         Self {
             model_id: model_id.into(),
@@ -107,6 +134,11 @@ impl EmbeddingProvider for HashEmbeddingProvider {
     }
 }
 
+/// Computes cosine similarity, returning zero for incompatible vectors.
+///
+/// Returning zero keeps retrieval robust when a malformed cache or provider bug
+/// slips past earlier validation; callers then simply get no positive semantic
+/// hit for that pair.
 pub fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     if left.is_empty() || left.len() != right.len() {
         return 0.0;
@@ -127,6 +159,11 @@ pub fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     }
 }
 
+/// Downloads any missing model files into the local cache directory.
+///
+/// The check is all-or-download so a partially populated cache is repaired on
+/// demand. If the final files are still missing, callers receive a typed model
+/// error that can be shown as a recoverable tool failure.
 fn ensure_model_files(model_dir: &PathBuf) -> Result<(), CodeSearchError> {
     if MODEL_FILES
         .iter()
@@ -158,6 +195,7 @@ fn ensure_model_files(model_dir: &PathBuf) -> Result<(), CodeSearchError> {
     }
 }
 
+/// Computes the on-disk directory for the default model.
 fn default_model_cache_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -167,6 +205,7 @@ fn default_model_cache_dir() -> PathBuf {
         .join(DEFAULT_MODEL_ID.replace('/', "--"))
 }
 
+/// Produces deterministic normalized bag-of-token vectors for tests.
 fn hash_embedding(text: &str, dimensions: usize) -> Vec<f32> {
     let dimensions = dimensions.max(1);
     let mut vector = vec![0.0; dimensions];

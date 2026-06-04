@@ -1,29 +1,54 @@
+//! Code chunking.
+//!
+//! Chunks are the unit that both BM25 and dense retrieval rank, so boundaries
+//! need to be stable, source-locatable, and small enough for embeddings. The
+//! chunker is designed to be language-extensible: supported programming and
+//! config languages use tree-sitter AST boundaries first, while docs, data, and
+//! parser failures fall back to line chunks with the same approximate size
+//! target. This makes language coverage additive without changing the retrieval
+//! contract that every chunk has source text and 1-indexed line bounds.
+
 use std::ops::Range;
 use std::path::Path;
 
+use tree_sitter::Language;
 use tree_sitter::Node;
 use tree_sitter::Parser;
 
+use crate::grammars::language_for_chunking;
 use crate::types::Chunk;
 
 const DESIRED_CHUNK_CHARS: usize = 1_500;
-const MIN_CHUNK_CHARS: usize = 50;
 const RECURSION_DEPTH: usize = 500;
 
+/// Splits a file into searchable chunks with 1-indexed line ranges.
+///
+/// Tree-sitter grammars provide semantic boundaries when a supported language
+/// parses cleanly. Any missing grammar, parser setup error, syntax error, or
+/// empty AST result returns to line chunking so incomplete code still remains
+/// searchable.
 pub fn chunk_file(relative_path: &Path, language: &str, content: &str) -> Vec<Chunk> {
-    if language == "rust" {
-        let rust_chunks = chunk_rust_ast(relative_path, content);
-        if !rust_chunks.is_empty() {
-            return rust_chunks;
+    if let Some(parser_language) = language_for_chunking(language) {
+        let ast_chunks = chunk_by_ast(relative_path, language, content, parser_language);
+        if !ast_chunks.is_empty() {
+            return ast_chunks;
         }
     }
     chunk_by_lines(relative_path, language, content)
 }
 
-fn chunk_rust_ast(relative_path: &Path, content: &str) -> Vec<Chunk> {
+/// Attempts AST chunking using a tree-sitter grammar selected by language label.
+///
+/// The returned chunks use the discovery language label rather than the grammar
+/// crate name, preserving the public result language values.
+fn chunk_by_ast(
+    relative_path: &Path,
+    language: &str,
+    content: &str,
+    parser_language: Language,
+) -> Vec<Chunk> {
     let mut parser = Parser::new();
-    let language = tree_sitter_rust::LANGUAGE.into();
-    if parser.set_language(&language).is_err() {
+    if parser.set_language(&parser_language).is_err() {
         return Vec::new();
     }
     let Some(tree) = parser.parse(content, None) else {
@@ -39,9 +64,14 @@ fn chunk_rust_ast(relative_path: &Path, content: &str) -> Vec<Chunk> {
     for child in root.named_children(&mut cursor) {
         collect_node_ranges(child, content, 0, &mut ranges);
     }
-    merge_ranges(relative_path, "rust", content, ranges)
+    merge_ranges(relative_path, language, content, ranges)
 }
 
+/// Recursively collects AST node byte ranges close to the target chunk size.
+///
+/// The recursion limit is a guard against pathological trees. Small named nodes
+/// are still collected so compact definitions in languages such as config files
+/// or shell scripts are not discarded before merge can add surrounding context.
 fn collect_node_ranges(
     node: Node<'_>,
     content: &str,
@@ -55,9 +85,7 @@ fn collect_node_ranges(
     let char_len = content[range.clone()].chars().count();
     if char_len <= DESIRED_CHUNK_CHARS || depth >= RECURSION_DEPTH || node.named_child_count() == 0
     {
-        if char_len >= MIN_CHUNK_CHARS {
-            ranges.push(range);
-        }
+        ranges.push(range);
         return;
     }
 
@@ -67,6 +95,10 @@ fn collect_node_ranges(
     }
 }
 
+/// Merges adjacent AST ranges without exceeding the target chunk size.
+///
+/// Tree-sitter often returns many small top-level nodes. Merging preserves source
+/// order while giving the embedding model enough surrounding context.
 fn merge_ranges(
     relative_path: &Path,
     language: &str,
@@ -97,6 +129,8 @@ fn merge_ranges(
     merged
 }
 
+/// Converts a byte range into a trimmed chunk while preserving original line
+/// bounds.
 fn push_byte_chunk(
     chunks: &mut Vec<Chunk>,
     relative_path: &Path,
@@ -117,6 +151,10 @@ fn push_byte_chunk(
     });
 }
 
+/// Fallback chunker for unsupported languages and parser failures.
+///
+/// Line-based splitting never slices through UTF-8 bytes and keeps line spans
+/// straightforward for `find_related`.
 fn chunk_by_lines(relative_path: &Path, language: &str, content: &str) -> Vec<Chunk> {
     let mut chunks = Vec::new();
     let mut current = String::new();
@@ -153,6 +191,7 @@ fn chunk_by_lines(relative_path: &Path, language: &str, content: &str) -> Vec<Ch
     chunks
 }
 
+/// Converts a byte offset to a 1-indexed line number.
 fn byte_to_line(content: &str, byte_idx: usize) -> usize {
     content
         .as_bytes()
@@ -168,6 +207,8 @@ mod tests {
     use std::path::Path;
 
     use pretty_assertions::assert_eq;
+
+    use crate::grammars::language_for_chunking;
 
     use super::*;
 
@@ -187,11 +228,261 @@ mod tests {
     }
 
     /// Trace: L2-DES-TOOL-001
+    /// Verifies: supported programming and config language labels parse through AST chunking.
+    #[test]
+    fn ast_chunking_parses_supported_code_and_config_languages() {
+        let cases = [
+            (
+                "rust",
+                "src/lib.rs",
+                "fn parse_input(value: &str) -> &str { value }\n",
+                "parse_input",
+            ),
+            (
+                "python",
+                "parser.py",
+                "def parse_input(value):\n    return value\n",
+                "parse_input",
+            ),
+            (
+                "javascript",
+                "parser.js",
+                "function parseInput(value) { return value; }\n",
+                "parseInput",
+            ),
+            (
+                "javascriptreact",
+                "App.jsx",
+                "const App = () => <div>parser</div>;\n",
+                "parser",
+            ),
+            (
+                "typescript",
+                "parser.ts",
+                "type Value = string;\nfunction parseInput(value: Value): Value { return value; }\n",
+                "parseInput",
+            ),
+            (
+                "typescriptreact",
+                "App.tsx",
+                "type Props = { value: string };\nexport function App(props: Props) { return <div>{props.value}</div>; }\n",
+                "props",
+            ),
+            (
+                "go",
+                "parser.go",
+                "package main\nfunc parseInput(value string) string { return value }\n",
+                "parseInput",
+            ),
+            (
+                "java",
+                "Parser.java",
+                "class Parser { String parseInput(String value) { return value; } }\n",
+                "parseInput",
+            ),
+            (
+                "kotlin",
+                "Parser.kt",
+                "fun parseInput(value: String): String { return value }\n",
+                "parseInput",
+            ),
+            (
+                "c",
+                "parser.c",
+                "int parse_input(int value) { return value; }\n",
+                "parse_input",
+            ),
+            (
+                "cpp",
+                "parser.cpp",
+                "int parse_input(int value) { return value; }\n",
+                "parse_input",
+            ),
+            (
+                "csharp",
+                "Parser.cs",
+                "class Parser { string ParseInput(string value) { return value; } }\n",
+                "ParseInput",
+            ),
+            (
+                "ruby",
+                "parser.rb",
+                "def parse_input(value)\n  value\nend\n",
+                "parse_input",
+            ),
+            (
+                "php",
+                "parser.php",
+                "<?php\nfunction parse_input($value) { return $value; }\n",
+                "parse_input",
+            ),
+            (
+                "swift",
+                "Parser.swift",
+                "func parseInput(_ value: String) -> String { return value }\n",
+                "parseInput",
+            ),
+            (
+                "scala",
+                "Parser.scala",
+                "object Parser { def parseInput(value: String): String = value }\n",
+                "parseInput",
+            ),
+            (
+                "shell",
+                "parser.sh",
+                "parse_input() {\n  echo \"$1\"\n}\n",
+                "parse_input",
+            ),
+            (
+                "powershell",
+                "parser.ps1",
+                "$Parser = \"parser\"\nWrite-Output $Parser\n",
+                "Parser",
+            ),
+            (
+                "lua",
+                "parser.lua",
+                "function parse_input(value)\n  return value\nend\n",
+                "parse_input",
+            ),
+            (
+                "r",
+                "parser.r",
+                "parse_input <- function(value) {\n  value\n}\n",
+                "parse_input",
+            ),
+            (
+                "sql",
+                "schema.sql",
+                "CREATE TABLE parser (id INTEGER);\nSELECT id FROM parser;\n",
+                "parser",
+            ),
+            (
+                "toml",
+                "Cargo.toml",
+                "[package]\nname = \"parser\"\n",
+                "parser",
+            ),
+            (
+                "yaml",
+                "config.yaml",
+                "package:\n  name: parser\n",
+                "parser",
+            ),
+            (
+                "json",
+                "config.json",
+                "{\"package\":{\"name\":\"parser\"}}\n",
+                "parser",
+            ),
+            (
+                "config",
+                "settings.ini",
+                "[package]\nname=parser\n",
+                "parser",
+            ),
+            (
+                "xml",
+                "config.xml",
+                "<package><name>parser</name></package>\n",
+                "parser",
+            ),
+            (
+                "dockerfile",
+                "Dockerfile",
+                "FROM alpine\nRUN echo parser\n",
+                "parser",
+            ),
+        ];
+
+        let parsed = cases
+            .iter()
+            .map(|(language, path, source, needle)| {
+                let parser_language = language_for_chunking(language).expect("grammar");
+                let chunks = chunk_by_ast(Path::new(path), language, source, parser_language);
+                (
+                    *language,
+                    !chunks.is_empty(),
+                    chunks.iter().all(|chunk| chunk.language == *language),
+                    chunks.iter().any(|chunk| chunk.content.contains(needle)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected = cases
+            .iter()
+            .map(|(language, _, _, _)| (*language, true, true, true))
+            .collect::<Vec<_>>();
+
+        assert_eq!(parsed, expected);
+    }
+
+    /// Trace: L2-DES-TOOL-001
+    /// Verifies: small named AST nodes are retained instead of being dropped before merge.
+    #[test]
+    fn ast_chunking_keeps_small_named_nodes() {
+        let chunks = chunk_by_ast(
+            Path::new("src/lib.rs"),
+            "rust",
+            "fn a() {}\n",
+            language_for_chunking("rust").expect("grammar"),
+        );
+        let expected = vec![Chunk {
+            content: "fn a() {}".to_string(),
+            file_path: Path::new("src/lib.rs").to_path_buf(),
+            start_line: 1,
+            end_line: 1,
+            language: "rust".to_string(),
+        }];
+
+        assert_eq!(chunks, expected);
+    }
+
+    /// Trace: L2-DES-TOOL-001
+    /// Verifies: docs and data labels keep line-based chunking.
+    #[test]
+    fn docs_and_data_use_line_chunking() {
+        let outputs = ["markdown", "rst", "text", "data"]
+            .iter()
+            .map(|language| chunk_file(Path::new("note.txt"), language, "one\ntwo\nthree\n"))
+            .collect::<Vec<_>>();
+        let expected = ["markdown", "rst", "text", "data"]
+            .into_iter()
+            .map(|language| {
+                vec![Chunk {
+                    content: "one\ntwo\nthree".to_string(),
+                    file_path: Path::new("note.txt").to_path_buf(),
+                    start_line: 1,
+                    end_line: 3,
+                    language: language.to_string(),
+                }]
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(outputs, expected);
+    }
+
+    /// Trace: L2-DES-TOOL-001
+    /// Verifies: parser errors for supported languages fall back to line chunks.
+    #[test]
+    fn parser_errors_fall_back_to_line_chunking() {
+        let chunks = chunk_file(Path::new("src/lib.rs"), "rust", "fn broken(\n");
+        let expected = vec![Chunk {
+            content: "fn broken(".to_string(),
+            file_path: Path::new("src/lib.rs").to_path_buf(),
+            start_line: 1,
+            end_line: 1,
+            language: "rust".to_string(),
+        }];
+
+        assert_eq!(chunks, expected);
+    }
+
+    /// Trace: L2-DES-TOOL-001
     /// Verifies: Rust code uses AST chunking when parser boundaries are available.
     #[test]
     fn rust_chunking_uses_ast_boundaries() {
-        let source = r#"
-fn first() {
+        let source = r#"fn first() {
     println!("first");
 }
 

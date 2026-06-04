@@ -1,8 +1,20 @@
+//! Identifier-aware tokenization for sparse retrieval.
+//!
+//! Code search needs `parse_input`, `ParseInput`, and `parse input` to overlap.
+//! These helpers split snake_case and camel/PascalCase identifiers, preserve the
+//! raw lowercase identifier as a token, and enrich BM25 documents with file/path
+//! terms so short symbol queries can still find the right module.
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::types::Chunk;
 
+/// Builds the BM25 document text for a chunk.
+///
+/// The file stem is repeated to emulate Semble's path-aware sparse weighting:
+/// chunk content remains dominant, but filename/module matches get enough signal
+/// to help identifier-heavy queries.
 pub fn enrich_for_bm25(chunk: &Chunk) -> String {
     let mut parts = vec![chunk.content.clone()];
     if let Some(stem) = chunk.file_path.file_stem().and_then(|stem| stem.to_str()) {
@@ -23,6 +35,7 @@ pub fn enrich_for_bm25(chunk: &Chunk) -> String {
     parts.join(" ")
 }
 
+/// Returns normalized query terms used by path reranking.
 pub fn query_terms(query: &str) -> Vec<String> {
     split_identifier_tokens(query)
         .into_iter()
@@ -30,6 +43,10 @@ pub fn query_terms(query: &str) -> Vec<String> {
         .collect()
 }
 
+/// Heuristically detects exact-symbol style queries.
+///
+/// Symbol queries use a lower semantic alpha because matching names and paths is
+/// often more important than natural-language meaning for these inputs.
 pub fn is_symbol_query(query: &str) -> bool {
     let trimmed = query.trim();
     if trimmed.is_empty() || trimmed.split_whitespace().count() != 1 {
@@ -44,6 +61,7 @@ pub fn is_symbol_query(query: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '.'))
 }
 
+/// Splits a file stem into terms for path-aware boosts.
 pub fn file_stem_terms(path: &Path) -> BTreeSet<String> {
     path.file_stem()
         .and_then(|stem| stem.to_str())
@@ -53,6 +71,10 @@ pub fn file_stem_terms(path: &Path) -> BTreeSet<String> {
         .collect()
 }
 
+/// Splits arbitrary code/query text into stable lowercase identifier tokens.
+///
+/// The returned set includes both the full lowercase identifier and its
+/// camel/snake pieces. Sorting and deduplication keep BM25 input deterministic.
 pub fn split_identifier_tokens(input: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for raw in input
@@ -68,6 +90,7 @@ pub fn split_identifier_tokens(input: &str) -> Vec<String> {
     tokens
 }
 
+/// Splits one identifier token on snake and camel/Pascal boundaries.
 fn split_camel_and_snake(input: &str) -> Vec<String> {
     let mut out = Vec::new();
     for part in input.split('_').filter(|part| !part.is_empty()) {
