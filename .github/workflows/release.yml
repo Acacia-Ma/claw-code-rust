@@ -58,14 +58,10 @@ jobs:
 
       - name: Build release binary (x86_64 Linux)
         if: matrix.target == 'x86_64-unknown-linux-musl'
-        env:
-          RUSTFLAGS: -C strip=symbols
         run: cargo zigbuild --release --target ${{ matrix.target }} -p devo-cli
 
       - name: Build release binary (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-musl'
-        env:
-          RUSTFLAGS: -C strip=symbols
         run: cargo zigbuild --release --target ${{ matrix.target }} -p devo-cli
 
       - name: Build release binary (macOS)
