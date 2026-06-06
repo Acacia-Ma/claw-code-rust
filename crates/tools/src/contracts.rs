@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::coordinator::AgentToolCoordinator;
 use crate::invocation::ToolCallId;
 use crate::tool_spec::ToolSpec;
 use tokio_util::sync::CancellationToken;
@@ -32,6 +33,7 @@ pub struct ToolContext {
     pub workspace_root: PathBuf,
     pub budgets: ToolBudgets,
     pub cancel_token: CancellationToken,
+    pub agent_coordinator: Option<Arc<dyn AgentToolCoordinator>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -43,6 +45,10 @@ impl std::fmt::Debug for ToolContext {
             .field("workspace_root", &self.workspace_root)
             .field("budgets", &self.budgets)
             .field("cancel_token", &self.cancel_token)
+            .field(
+                "agent_coordinator",
+                &self.agent_coordinator.as_ref().map(|_| "<configured>"),
+            )
             .finish_non_exhaustive()
     }
 }

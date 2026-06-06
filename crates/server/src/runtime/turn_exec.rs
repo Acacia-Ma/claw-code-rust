@@ -1315,6 +1315,7 @@ impl ServerRuntime {
                     session_id: session_id.to_string(),
                     turn_id: Some(turn_for_events.turn_id.to_string()),
                     cwd: core_session.cwd.clone(),
+                    agent_coordinator: Some(Arc::clone(&self) as Arc<dyn AgentToolCoordinator>),
                 },
                 ToolExecutionOptions::default(),
             );
@@ -1479,6 +1480,8 @@ impl ServerRuntime {
                 "turn execution completed"
             );
         }
+        self.handle_subagent_turn_completed(session_id, &final_turn)
+            .await;
         self.broadcast_event(ServerEvent::TurnCompleted(TurnEventPayload {
             session_id,
             turn: final_turn,

@@ -68,6 +68,14 @@ use crate::events::WorkerEvent;
 const WORKER_SHUTDOWN_GRACE: Duration = Duration::from_millis(100);
 const WORKER_ABORT_JOIN_TIMEOUT: Duration = Duration::from_millis(500);
 
+fn active_agent_label_from_session(session: &devo_server::SessionMetadata) -> Option<String> {
+    session
+        .agent_nickname
+        .as_ref()
+        .or(session.agent_path.as_ref())
+        .map(|label| format!("Agent: {label}"))
+}
+
 struct EnsureSessionOutcome {
     session_id: SessionId,
     model: Option<String>,
@@ -519,6 +527,7 @@ async fn run_worker_inner(
                 active_turn_id = None;
                 session_id = Some(initial_session_id);
                 session_cwd = resumed.session.cwd.clone();
+                let active_agent_label = active_agent_label_from_session(&resumed.session);
                 let _ = event_tx.send(WorkerEvent::SessionSwitched {
                     session_id: initial_session_id.to_string(),
                     cwd: resumed.session.cwd,
@@ -526,6 +535,7 @@ async fn run_worker_inner(
                     model: resumed.session.model.clone(),
                     thinking: resumed.session.thinking.clone(),
                     reasoning_effort: resumed.session.reasoning_effort,
+                    active_agent_label,
                     total_input_tokens: resumed.session.total_input_tokens,
                     total_output_tokens: resumed.session.total_output_tokens,
                     total_cache_read_tokens: resumed.session.total_cache_read_tokens,
@@ -952,6 +962,7 @@ async fn run_worker_inner(
                             model: model.clone(),
                             thinking: thinking_selection.clone(),
                             reasoning_effort: None,
+                            active_agent_label: None,
                             last_query_total_tokens,
                             last_query_input_tokens,
                             total_cache_read_tokens,
@@ -971,6 +982,8 @@ async fn run_worker_inner(
                                 session_id = Some(next_session_id);
                                 session_cwd = result.session.cwd.clone();
                                 input_history_cursor = None;
+                                let active_agent_label =
+                                    active_agent_label_from_session(&result.session);
 
                                 let _ = event_tx.send(WorkerEvent::SessionSwitched {
                                     session_id: next_session_id.to_string(),
@@ -979,6 +992,7 @@ async fn run_worker_inner(
                                     model: result.session.model.clone(),
                                     thinking: result.session.thinking.clone(),
                                     reasoning_effort: result.session.reasoning_effort,
+                                    active_agent_label,
                                     total_input_tokens: result.session.total_input_tokens,
                                     total_output_tokens: result.session.total_output_tokens,
                                     total_cache_read_tokens: result.session.total_cache_read_tokens,
@@ -1090,6 +1104,8 @@ async fn run_worker_inner(
                                 active_turn_id = None;
                                 session_cwd = result.session.cwd.clone();
                                 input_history_cursor = None;
+                                let active_agent_label =
+                                    active_agent_label_from_session(&result.session);
                                 let _ = event_tx.send(WorkerEvent::SessionSwitched {
                                     session_id: active_session_id.to_string(),
                                     cwd: result.session.cwd,
@@ -1097,6 +1113,7 @@ async fn run_worker_inner(
                                     model: result.session.model.clone(),
                                     thinking: result.session.thinking.clone(),
                                     reasoning_effort: result.session.reasoning_effort,
+                                    active_agent_label,
                                     total_input_tokens: result.session.total_input_tokens,
                                     total_output_tokens: result.session.total_output_tokens,
                                     total_cache_read_tokens: result.session.total_cache_read_tokens,
@@ -1170,6 +1187,8 @@ async fn run_worker_inner(
                                         session_id = Some(next_session_id);
                                         session_cwd = resumed.session.cwd.clone();
                                         input_history_cursor = None;
+                                        let active_agent_label =
+                                            active_agent_label_from_session(&resumed.session);
                                         let _ = event_tx.send(WorkerEvent::SessionSwitched {
                                             session_id: next_session_id.to_string(),
                                             cwd: resumed.session.cwd,
@@ -1177,6 +1196,7 @@ async fn run_worker_inner(
                                             model: resumed.session.model.clone(),
                                             thinking: resumed.session.thinking.clone(),
                                             reasoning_effort: resumed.session.reasoning_effort,
+                                            active_agent_label,
                                             total_input_tokens: resumed.session.total_input_tokens,
                                             total_output_tokens: resumed.session.total_output_tokens,
                                             total_cache_read_tokens: resumed.session.total_cache_read_tokens,
@@ -2579,10 +2599,6 @@ fn summarize_tool_input(tool_name: &str, input: &serde_json::Value) -> String {
                 _ => None,
             }
         }
-        "task" => input
-            .get("description")
-            .and_then(serde_json::Value::as_str)
-            .map(|s| s.to_string()),
         "question" => None,
         "skill" => input
             .get("name")
@@ -3497,6 +3513,10 @@ mod tests {
             updated_at: Utc::now(),
             title: Some("Saved conversation".to_string()),
             title_state: SessionTitleState::Provisional,
+            parent_session_id: None,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
             ephemeral: false,
             model: Some("test-model".to_string()),
             thinking: None,
@@ -3532,6 +3552,10 @@ mod tests {
             updated_at: Utc::now(),
             title: Some("Saved conversation".to_string()),
             title_state: SessionTitleState::Provisional,
+            parent_session_id: None,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
             ephemeral: false,
             model: Some("test-model".to_string()),
             thinking: None,

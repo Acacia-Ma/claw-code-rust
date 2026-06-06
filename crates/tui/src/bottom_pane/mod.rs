@@ -450,6 +450,12 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_active_agent_label(&mut self, active_agent_label: Option<String>) {
+        if self.composer.set_active_agent_label(active_agent_label) {
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn set_task_running(&mut self, running: bool) {
         let was_running = self.is_task_running;
         self.is_task_running = running;

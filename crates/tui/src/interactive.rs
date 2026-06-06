@@ -275,6 +275,7 @@ pub async fn run_interactive_tui(config: InteractiveTuiConfig) -> Result<AppExit
             request_model,
             provider: Some(initial_provider),
             reasoning_effort: initial_reasoning_effort,
+            active_agent_label: None,
         },
         initial_thinking_selection: initial_session.thinking_selection.clone(),
         initial_permission_preset: initial_session.permission_preset,

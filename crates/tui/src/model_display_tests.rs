@@ -50,6 +50,7 @@ fn widget_with_model(
             request_model,
             provider: Some(ProviderWireApi::OpenAIChatCompletions),
             reasoning_effort: None,
+            active_agent_label: None,
         },
         initial_thinking_selection: None,
         initial_permission_preset: PermissionPreset::Default,

@@ -121,10 +121,6 @@ pub fn tool_summary(name: &str, input: &serde_json::Value, cwd: &Path) -> String
         }
         "question" => "question".to_string(),
         "update_plan" => "update_plan".to_string(),
-        "task" => {
-            let desc = input["description"].as_str().unwrap_or("");
-            format!("task: {desc}")
-        }
         "lsp" => {
             let path = input["filePath"].as_str().unwrap_or("");
             let rel = make_relative(cwd, path);

@@ -395,19 +395,6 @@ fn question_schema() -> JsonSchema {
     )
 }
 
-fn task_schema() -> JsonSchema {
-    JsonSchema::object(
-        BTreeMap::from([(
-            "description".to_string(),
-            JsonSchema::string(Some(
-                "A clear, concise description of the task to accomplish",
-            )),
-        )]),
-        Some(vec!["description".to_string()]),
-        Some(false),
-    )
-}
-
 fn webfetch_schema() -> JsonSchema {
     JsonSchema::object(
         BTreeMap::from([
@@ -722,24 +709,6 @@ pub fn build_tool_registry_plan(config: &ToolPlanConfig) -> ToolRegistryPlan {
             supports_streaming: None,
         },
         ToolHandlerKind::Question,
-    );
-
-    plan.push(
-        ToolSpec {
-            name: "task".to_string(),
-            description: "Launch a new agent to handle complex, multistep tasks autonomously."
-                .to_string(),
-            input_schema: task_schema(),
-            output_mode: ToolOutputMode::Text,
-            execution_mode: ToolExecutionMode::Mutating,
-            capability_tags: vec![],
-            supports_parallel: false,
-            preparation_feedback: ToolPreparationFeedback::None,
-            display_name: None,
-            supports_cancellation: None,
-            supports_streaming: None,
-        },
-        ToolHandlerKind::Task,
     );
 
     plan.push(

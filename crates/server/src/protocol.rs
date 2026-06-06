@@ -1,5 +1,7 @@
 pub use devo_protocol::{
-    ClientMethod, ClientNotification, ClientRequest, ErrorResponse, ModelCatalogEntry,
+    AgentCompletionNotification, AgentInfo, AgentListParams, AgentListResult, AgentMailboxMessage,
+    AgentMessageParams, AgentMessageResult, AgentStatusParams, ClientMethod, ClientNotification,
+    ClientRequest, CloseAgentParams, CloseAgentResult, ErrorResponse, ModelCatalogEntry,
     ModelCatalogParams, ModelCatalogResult, ModelSavedEntry, ModelSavedParams, ModelSavedResult,
     NotificationEnvelope, ProtocolError, ProtocolErrorCode, ReferenceSearchCancelParams,
     ReferenceSearchCancelResult, ReferenceSearchFailedPayload, ReferenceSearchId,
@@ -8,5 +10,5 @@ pub use devo_protocol::{
     ReferenceSearchUpdateResult, ServerRequestEnvelope, SkillChangedParams, SkillChangedResult,
     SkillDependencies, SkillInterface, SkillListParams, SkillListResult, SkillRecord, SkillScope,
     SkillSetEnabledParams, SkillSetEnabledResult, SkillSource, SkillToolDependency,
-    SuccessResponse,
+    SpawnAgentParams, SpawnAgentResult, SuccessResponse, WaitAgentParams, WaitAgentResult,
 };

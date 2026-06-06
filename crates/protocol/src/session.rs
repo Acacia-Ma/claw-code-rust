@@ -33,6 +33,14 @@ pub struct SessionMetadata {
     pub updated_at: DateTime<Utc>,
     pub title: Option<String>,
     pub title_state: SessionTitleState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_nickname: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<String>,
     pub ephemeral: bool,
     pub model: Option<String>,
     pub thinking: Option<String>,
@@ -334,6 +342,10 @@ mod tests {
             updated_at: Utc::now(),
             title: Some("Test".to_string()),
             title_state: SessionTitleState::Unset,
+            parent_session_id: None,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
             ephemeral: false,
             model: Some("test-model".to_string()),
             thinking: Some("medium".to_string()),

@@ -88,6 +88,10 @@ impl ServerRuntime {
                 .as_ref()
                 .map(|_| SessionTitleState::Final(SessionTitleFinalSource::ExplicitCreate))
                 .unwrap_or(SessionTitleState::Unset),
+            parent_session_id: None,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
             ephemeral: params.ephemeral,
             model: Some(model.clone()),
             thinking: None,
@@ -742,6 +746,10 @@ impl ServerRuntime {
             updated_at,
             title: title_override.or_else(|| source.summary.title.clone()),
             title_state: source.summary.title_state.clone(),
+            parent_session_id: None,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
             ephemeral: source.summary.ephemeral,
             model: source.summary.model.clone(),
             thinking: source.summary.thinking.clone(),

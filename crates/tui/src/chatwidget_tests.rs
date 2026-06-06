@@ -1481,6 +1481,7 @@ fn session_switch_restores_plan_metadata_into_progress() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -1532,6 +1533,7 @@ fn session_switch_restores_explored_metadata_into_history() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -1594,6 +1596,7 @@ fn session_switch_restores_edited_metadata_into_history() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -1637,6 +1640,7 @@ fn session_switch_merges_consecutive_explored_items() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -1711,6 +1715,7 @@ fn session_switch_restores_error_via_tool_result_cell_style() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -1771,6 +1776,7 @@ fn live_and_resume_error_share_same_rendering_chain() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -2285,6 +2291,7 @@ fn session_switch_restores_header_and_spacing_before_user_input() {
         model: Some("resumed-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 3,
         total_output_tokens: 5,
         total_cache_read_tokens: 0,
@@ -3094,6 +3101,7 @@ fn restored_reasoning_text_is_visible_in_transcript() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -3484,6 +3492,7 @@ fn session_switch_updates_session_identity_projection() {
         model: Some("resumed-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 3,
         total_output_tokens: 5,
         total_cache_read_tokens: 0,
@@ -3523,6 +3532,7 @@ fn status_summary_uses_last_turn_total_when_idle_and_live_estimate_while_busy() 
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 12,
         total_output_tokens: 18,
         total_cache_read_tokens: 4,
@@ -3613,6 +3623,44 @@ fn streaming_controller_is_initialized_and_commit_ticks_drain_lines() {
 }
 
 #[test]
+fn session_switch_sets_active_agent_footer_label() {
+    let cwd = std::env::current_dir().expect("current directory is available");
+    let model = Model {
+        slug: "test-model".to_string(),
+        display_name: "Test Model".to_string(),
+        ..Model::default()
+    };
+    let (mut widget, _app_event_rx) = widget_with_model(model, cwd);
+
+    widget.handle_worker_event(crate::events::WorkerEvent::SessionSwitched {
+        session_id: "session-1".to_string(),
+        cwd: std::env::current_dir().expect("current directory is available"),
+        title: Some("Agent Session".to_string()),
+        model: Some("test-model".to_string()),
+        thinking: None,
+        reasoning_effort: None,
+        active_agent_label: Some("Agent: cr".to_string()),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
+        last_query_total_tokens: 0,
+        last_query_input_tokens: 0,
+        prompt_token_estimate: 0,
+        history_items: Vec::new(),
+        rich_history_items: Vec::new(),
+        loaded_item_count: 0,
+        pending_texts: vec![],
+    });
+
+    let rows = rendered_rows(&widget, 80, 16);
+    assert!(
+        rows.iter().any(|row| row.contains("Agent: cr")),
+        "expected active agent footer label in rows:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
 fn new_session_prepared_appends_header_after_existing_history_and_resets_status() {
     let initial_cwd = std::env::current_dir().expect("current directory is available");
     let resumed_cwd = initial_cwd.join("resumed");
@@ -3630,6 +3678,7 @@ fn new_session_prepared_appends_header_after_existing_history_and_resets_status(
         model: Some("resumed-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 30,
         total_output_tokens: 5,
         total_cache_read_tokens: 12,
@@ -3651,6 +3700,7 @@ fn new_session_prepared_appends_header_after_existing_history_and_resets_status(
         model: "new-session-model".to_string(),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         last_query_total_tokens: 25,
         last_query_input_tokens: 20,
         total_cache_read_tokens: 12,
@@ -3699,6 +3749,7 @@ fn new_session_prepared_does_not_duplicate_startup_header_without_history() {
         model: "new-session-model".to_string(),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         last_query_total_tokens: 10,
         last_query_input_tokens: 10,
         total_cache_read_tokens: 4,
@@ -5289,6 +5340,7 @@ fn session_switch_without_rich_edited_metadata_degrades_to_tool_result_path() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -5335,6 +5387,7 @@ fn session_switch_restores_added_file_content_in_edited_block() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,
@@ -5382,6 +5435,7 @@ fn session_switch_without_rich_edited_metadata_still_restores_edited_block() {
         model: Some("test-model".to_string()),
         thinking: None,
         reasoning_effort: None,
+        active_agent_label: None,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_cache_read_tokens: 0,

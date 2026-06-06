@@ -1,3 +1,4 @@
+mod agent;
 mod approval;
 mod connection;
 mod conversation;
@@ -18,6 +19,7 @@ mod truncation;
 mod turn;
 pub mod user_input;
 
+pub use agent::*;
 pub use approval::*;
 pub use connection::*;
 pub use conversation::*;

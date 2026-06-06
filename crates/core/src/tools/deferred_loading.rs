@@ -376,7 +376,10 @@ fn alias_map(registered: &HashSet<&str>) -> HashMap<String, String> {
     insert_alias(&mut aliases, registered, "loadtool", "ToolSearch");
     insert_alias(&mut aliases, registered, "subagent", "spawn_agent");
     insert_alias(&mut aliases, registered, "delegate", "spawn_agent");
-    insert_alias(&mut aliases, registered, "task_tool", "spawn_agent");
+    insert_alias(&mut aliases, registered, "spawn_subagent", "spawn_agent");
+    insert_alias(&mut aliases, registered, "sub_agent", "spawn_agent");
+    insert_alias(&mut aliases, registered, "subagent_status", "list_agents");
+    insert_alias(&mut aliases, registered, "subagent_result", "wait_agent");
     aliases
 }
 
@@ -425,7 +428,6 @@ fn default_deferred_tools() -> BTreeSet<String> {
         "websearch",
         "fetch_url",
         "webfetch",
-        "task",
         "multi_tool_use",
         "goal_update",
         "spawn_agent",
@@ -556,6 +558,34 @@ mod tests {
         );
         assert!(loaded.is_loaded("session-1", "web_search"));
         assert!(loaded.is_loaded("session-1", "fetch_url"));
+    }
+
+    #[test]
+    fn tool_search_resolves_agent_spawn_aliases() {
+        let config = DeferredLoadingConfig::default();
+
+        for requested in ["spawn_agent", "subagent", "delegate"] {
+            let mut loaded = LoadedDeferredTools::default();
+            let result = execute_tool_search(
+                "session-1",
+                &format!("select:{requested}"),
+                &tools(),
+                &mut loaded,
+                &config,
+            )
+            .expect("agent spawn alias should resolve");
+
+            assert_eq!(
+                result,
+                ToolSearchResult {
+                    loaded: vec!["spawn_agent".to_string()],
+                    already_loaded: Vec::new(),
+                    already_available: Vec::new(),
+                    not_found: Vec::new(),
+                }
+            );
+            assert!(loaded.is_loaded("session-1", "spawn_agent"));
+        }
     }
 
     #[test]

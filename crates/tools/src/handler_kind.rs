@@ -10,7 +10,6 @@ pub enum ToolHandlerKind {
     ApplyPatch,
     Plan,
     Question,
-    Task,
     WebFetch,
     WebSearch,
     Skill,

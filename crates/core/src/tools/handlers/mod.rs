@@ -1,3 +1,4 @@
+mod agent;
 mod apply_patch;
 mod bash;
 mod code_search;
@@ -14,11 +15,11 @@ mod read;
 mod ripgrep;
 mod shell_command;
 mod skill;
-mod task;
 mod tool_search;
 mod webfetch;
 mod websearch;
 
+pub use agent::register_agent_tools;
 pub use apply_patch::ApplyPatchHandler;
 pub use bash::BashHandler;
 pub use code_search::CodeSearchHandler;
@@ -34,7 +35,6 @@ pub use question::QuestionHandler;
 pub use read::ReadHandler;
 pub use shell_command::ShellCommandHandler;
 pub use skill::SkillHandler;
-pub use task::TaskHandler;
 pub use tool_search::{ToolSearchHandler, tool_search_spec};
 pub use webfetch::WebFetchHandler;
 pub use websearch::WebSearchHandler;
@@ -115,6 +115,7 @@ fn build_registry_from_builder(
     mut builder: ToolRegistryBuilder,
     mcp_handlers: Vec<(String, Arc<dyn ToolHandler>)>,
 ) -> crate::registry::ToolRegistry {
+    register_agent_tools(&mut builder);
     builder.push_spec(tool_search_spec());
 
     let process_store = Arc::new(ProcessStore::new());
@@ -134,7 +135,6 @@ fn build_registry_from_builder(
             ToolHandlerKind::ApplyPatch => Arc::new(ApplyPatchHandler::new()),
             ToolHandlerKind::Plan => Arc::new(PlanHandler::new()),
             ToolHandlerKind::Question => Arc::new(QuestionHandler::new()),
-            ToolHandlerKind::Task => Arc::new(TaskHandler::new()),
             ToolHandlerKind::WebFetch => Arc::new(WebFetchHandler::new()),
             ToolHandlerKind::WebSearch => Arc::new(WebSearchHandler::new()),
             ToolHandlerKind::Skill => Arc::new(SkillHandler::new()),

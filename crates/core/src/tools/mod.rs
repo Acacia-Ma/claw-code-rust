@@ -42,6 +42,7 @@ pub use contracts::{
     ToolProgressSender, ToolResult, ToolResultContent, ToolTerminalStatus,
 };
 pub use deferred_loading::*;
+pub use devo_tools::AgentToolCoordinator;
 pub use errors::*;
 pub use events::ToolEvent;
 pub use handler_kind::ToolHandlerKind;

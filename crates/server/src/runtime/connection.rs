@@ -185,10 +185,19 @@ impl ServerRuntime {
             // cancel the current goal loop
             Some(ClientMethod::GoalCancel) => Some(self.handle_goal_cancel(id?, params).await),
             Some(ClientMethod::GoalStatus) => Some(self.handle_goal_status(id?, params).await),
+            Some(ClientMethod::AgentSpawn) => Some(self.handle_agent_spawn(id?, params).await),
+            Some(ClientMethod::AgentSendMessage) => {
+                Some(self.handle_agent_send_message(id?, params).await)
+            }
+            Some(ClientMethod::AgentFollowupTask) => {
+                Some(self.handle_agent_followup_task(id?, params).await)
+            }
+            Some(ClientMethod::AgentWait) => Some(self.handle_agent_wait(id?, params).await),
             // TODO: list the current sub agents, not sure whther the current agent is right.
             Some(ClientMethod::AgentList) => Some(self.handle_agent_list(id?, params).await),
             // TODO: get the agent status, it is the subagent session status, maybe the design is not right, wait for reviewing.
             Some(ClientMethod::AgentStatus) => Some(self.handle_agent_status(id?, params).await),
+            Some(ClientMethod::AgentClose) => Some(self.handle_agent_close(id?, params).await),
             // TODO: list the current provider vender list
             Some(ClientMethod::ProviderVendorList) => {
                 Some(self.handle_provider_vendor_list(id?, params).await)

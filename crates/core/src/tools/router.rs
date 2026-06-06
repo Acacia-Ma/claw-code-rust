@@ -16,6 +16,7 @@ use tracing::warn;
 use crate::invocation::ToolContent;
 use crate::registry::ToolRegistry;
 use crate::tool_spec::ToolCapabilityTag;
+use devo_tools::AgentToolCoordinator;
 use tokio_util::sync::CancellationToken;
 
 type ProgressCallback = dyn Fn(&str, &str) + Send + Sync;
@@ -243,6 +244,7 @@ impl ToolRuntime {
             workspace_root: self.context.cwd.clone(),
             budgets: self.execution_options.budgets,
             cancel_token: self.execution_options.cancel_token.clone(),
+            agent_coordinator: self.context.agent_coordinator.clone(),
         };
 
         let (progress_sender, progress_task) = match on_progress {
@@ -385,11 +387,26 @@ impl PermissionChecker {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ToolRuntimeContext {
     pub session_id: String,
     pub turn_id: Option<String>,
     pub cwd: PathBuf,
+    pub agent_coordinator: Option<Arc<dyn AgentToolCoordinator>>,
+}
+
+impl std::fmt::Debug for ToolRuntimeContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolRuntimeContext")
+            .field("session_id", &self.session_id)
+            .field("turn_id", &self.turn_id)
+            .field("cwd", &self.cwd)
+            .field(
+                "agent_coordinator",
+                &self.agent_coordinator.as_ref().map(|_| "<configured>"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -945,6 +962,7 @@ mod tests {
                 session_id: "session-1".into(),
                 turn_id: Some("turn-1".into()),
                 cwd: PathBuf::from("C:/workspace"),
+                agent_coordinator: None,
             },
         );
         let call = ToolCall {
@@ -1346,6 +1364,7 @@ mod tests {
         output_limit_bytes: usize,
         wall_time_limit_ms: Option<u64>,
         cancel_token_cancelled: bool,
+        agent_coordinator_configured: bool,
     }
 
     struct ContextCaptureTool {
@@ -1382,6 +1401,7 @@ mod tests {
                 output_limit_bytes: ctx.budgets.output_limit_bytes,
                 wall_time_limit_ms: ctx.budgets.wall_time_limit_ms,
                 cancel_token_cancelled: ctx.cancel_token.is_cancelled(),
+                agent_coordinator_configured: ctx.agent_coordinator.is_some(),
             });
             Ok(ToolResult::success(
                 ToolResultContent::Text("captured".into()),
@@ -1440,7 +1460,105 @@ mod tests {
                 output_limit_bytes: 7,
                 wall_time_limit_ms: Some(11),
                 cancel_token_cancelled: true,
+                agent_coordinator_configured: false,
             })
+        );
+    }
+
+    #[derive(Debug, Default)]
+    struct FakeAgentCoordinator;
+
+    #[async_trait]
+    impl devo_tools::AgentToolCoordinator for FakeAgentCoordinator {
+        async fn spawn_agent(
+            self: Arc<Self>,
+            _params: devo_protocol::SpawnAgentParams,
+        ) -> Result<devo_protocol::SpawnAgentResult, ToolCallError> {
+            Err(ToolCallError::InternalError("not used".to_string()))
+        }
+
+        async fn send_message(
+            self: Arc<Self>,
+            _params: devo_protocol::AgentMessageParams,
+        ) -> Result<devo_protocol::AgentMessageResult, ToolCallError> {
+            Err(ToolCallError::InternalError("not used".to_string()))
+        }
+
+        async fn followup_task(
+            self: Arc<Self>,
+            _params: devo_protocol::AgentMessageParams,
+        ) -> Result<devo_protocol::AgentMessageResult, ToolCallError> {
+            Err(ToolCallError::InternalError("not used".to_string()))
+        }
+
+        async fn wait_agent(
+            self: Arc<Self>,
+            _params: devo_protocol::WaitAgentParams,
+        ) -> Result<devo_protocol::WaitAgentResult, ToolCallError> {
+            Err(ToolCallError::InternalError("not used".to_string()))
+        }
+
+        async fn list_agents(
+            self: Arc<Self>,
+            _params: devo_protocol::AgentListParams,
+        ) -> Result<Vec<devo_protocol::AgentInfo>, ToolCallError> {
+            Err(ToolCallError::InternalError("not used".to_string()))
+        }
+
+        async fn close_agent(
+            self: Arc<Self>,
+            _params: devo_protocol::CloseAgentParams,
+        ) -> Result<devo_protocol::CloseAgentResult, ToolCallError> {
+            Err(ToolCallError::InternalError("not used".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_passes_agent_coordinator_to_tool_context() {
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let mut builder = ToolRegistryBuilder::new();
+        builder.register_handler(
+            "capture_context",
+            Arc::new(ContextCaptureTool::new(Arc::clone(&seen))),
+        );
+        builder.push_spec(ToolSpec {
+            name: "capture_context".into(),
+            description: String::new(),
+            input_schema: JsonSchema::object(Default::default(), None, None),
+            output_mode: ToolOutputMode::Text,
+            execution_mode: ToolExecutionMode::ReadOnly,
+            capability_tags: vec![],
+            supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
+        });
+        let runtime = ToolRuntime::new_with_context_and_options(
+            Arc::new(builder.build()),
+            PermissionChecker::always_allow(),
+            ToolRuntimeContext {
+                agent_coordinator: Some(
+                    Arc::new(FakeAgentCoordinator) as Arc<dyn devo_tools::AgentToolCoordinator>
+                ),
+                ..ToolRuntimeContext::default()
+            },
+            ToolExecutionOptions::default(),
+        );
+        let call = ToolCall {
+            id: "ctx".into(),
+            name: "capture_context".into(),
+            input: serde_json::json!({}),
+        };
+
+        let result = runtime.execute_single(&call, &None).await;
+
+        assert!(!result.is_error);
+        assert!(
+            seen.lock()
+                .expect("seen lock")
+                .as_ref()
+                .is_some_and(|context| context.agent_coordinator_configured)
         );
     }
 }

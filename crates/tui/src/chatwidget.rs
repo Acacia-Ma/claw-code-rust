@@ -107,6 +107,7 @@ pub(crate) struct TuiSessionState {
     pub(crate) request_model: Option<String>,
     pub(crate) provider: Option<ProviderWireApi>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) active_agent_label: Option<String>,
 }
 
 impl TuiSessionState {
@@ -118,6 +119,7 @@ impl TuiSessionState {
             request_model: None,
             provider,
             reasoning_effort: None,
+            active_agent_label: None,
         }
     }
 }
@@ -321,6 +323,7 @@ impl ChatWidget {
             animations_enabled: true,
         });
         bottom_pane.set_accent_color(initial_accent_color);
+        bottom_pane.set_active_agent_label(initial_session.active_agent_label.clone());
 
         let history: Vec<Box<dyn HistoryCell>> = if show_model_onboarding {
             vec![Box::new(StartupLogoCell::new(initial_accent_color))]

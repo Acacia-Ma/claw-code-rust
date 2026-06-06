@@ -466,6 +466,7 @@ mod tests {
                 output_limit_bytes: 32 * 1024,
             },
             cancel_token: CancellationToken::new(),
+            agent_coordinator: None,
         }
     }
 

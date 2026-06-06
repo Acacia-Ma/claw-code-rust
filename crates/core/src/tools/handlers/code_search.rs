@@ -261,6 +261,7 @@ mod tests {
                 wall_time_limit_ms: None,
             },
             cancel_token: CancellationToken::new(),
+            agent_coordinator: None,
         }
     }
 

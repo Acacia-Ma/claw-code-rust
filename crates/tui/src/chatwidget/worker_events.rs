@@ -676,6 +676,7 @@ impl ChatWidget {
                 model,
                 thinking,
                 reasoning_effort,
+                active_agent_label,
                 last_query_total_tokens: _,
                 last_query_input_tokens: _,
                 total_cache_read_tokens: _,
@@ -685,6 +686,8 @@ impl ChatWidget {
                 self.update_session_request_model(model);
                 self.thinking_selection = thinking;
                 self.session.reasoning_effort = reasoning_effort;
+                self.session.active_agent_label = active_agent_label.clone();
+                self.bottom_pane.set_active_agent_label(active_agent_label);
                 let should_append_header = self.history_has_non_header_content();
                 self.active_cell = None;
                 self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
@@ -715,6 +718,7 @@ impl ChatWidget {
                 model,
                 thinking,
                 reasoning_effort,
+                active_agent_label,
                 total_input_tokens,
                 total_output_tokens,
                 total_cache_read_tokens,
@@ -733,6 +737,8 @@ impl ChatWidget {
                 }
                 self.thinking_selection = thinking;
                 self.session.reasoning_effort = reasoning_effort;
+                self.session.active_agent_label = active_agent_label.clone();
+                self.bottom_pane.set_active_agent_label(active_agent_label);
                 self.history.clear();
                 self.next_history_flush_index = 0;
                 self.active_text_items.clear();

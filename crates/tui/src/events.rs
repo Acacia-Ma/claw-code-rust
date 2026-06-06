@@ -278,6 +278,8 @@ pub(crate) enum WorkerEvent {
         thinking: Option<String>,
         /// Effective reasoning effort currently configured for the next session.
         reasoning_effort: Option<ReasoningEffort>,
+        /// Contextual footer label for the active child agent, when viewing one.
+        active_agent_label: Option<String>,
         /// Last completed turn token usage for the fresh session.
         last_query_total_tokens: usize,
         /// Last completed query input tokens for the fresh session.
@@ -299,6 +301,8 @@ pub(crate) enum WorkerEvent {
         thinking: Option<String>,
         /// The effective reasoning effort restored from session context, when one exists.
         reasoning_effort: Option<ReasoningEffort>,
+        /// Contextual footer label for the active child agent, when viewing one.
+        active_agent_label: Option<String>,
         /// Total input tokens accumulated for the resumed session.
         total_input_tokens: usize,
         /// Total output tokens accumulated for the resumed session.

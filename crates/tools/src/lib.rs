@@ -1,4 +1,5 @@
 pub mod contracts;
+pub mod coordinator;
 pub mod errors;
 pub mod events;
 pub mod handler_kind;
@@ -12,6 +13,7 @@ pub use contracts::{
     RedactionState, SessionMode, ToolCallError, ToolContext, ToolPermissionProfile, ToolProgress,
     ToolProgressSender, ToolResult, ToolResultContent, ToolTerminalStatus,
 };
+pub use coordinator::AgentToolCoordinator;
 pub use errors::*;
 pub use events::ToolEvent;
 pub use handler_kind::ToolHandlerKind;

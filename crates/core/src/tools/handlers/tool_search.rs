@@ -254,6 +254,7 @@ mod tests {
                         wall_time_limit_ms: None,
                     },
                     cancel_token: tokio_util::sync::CancellationToken::new(),
+                    agent_coordinator: None,
                 },
                 serde_json::json!({ "query": "knowledge base" }),
                 None,

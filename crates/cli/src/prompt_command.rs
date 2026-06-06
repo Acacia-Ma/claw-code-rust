@@ -78,6 +78,7 @@ pub(crate) async fn run_prompt(
             session_id: session_state.id.clone(),
             turn_id: None,
             cwd: cwd.clone(),
+            agent_coordinator: None,
         },
     );
     let model_catalog = PresetModelCatalog::load_from_config(&home_dir, Some(&cwd))?;
