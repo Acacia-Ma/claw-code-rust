@@ -136,22 +136,22 @@ impl ToolHandler for GrepHandler {
 
         const MAX_RESULTS: usize = 500;
         let text = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = text.lines().collect();
-        if lines.is_empty() {
+        let mut lines = text.lines();
+        let mut displayed = lines.by_ref().take(MAX_RESULTS).collect::<Vec<_>>();
+        if displayed.is_empty() {
             return Ok(ToolResult::success(
                 ToolResultContent::Text("(no matches)".into()),
                 "No matches",
             ));
         }
-        let truncated = lines.len() > MAX_RESULTS;
-        let mut displayed = lines.iter().take(MAX_RESULTS).copied().collect::<Vec<_>>();
+        let truncated = lines.next().is_some();
         if truncated {
             displayed.push("(truncated at 500 matches)");
         }
         let summary = if truncated {
             "500+ matches".to_string()
         } else {
-            format!("{} matches", lines.len())
+            format!("{} matches", displayed.len())
         };
         Ok(ToolResult::success(
             ToolResultContent::Text(displayed.join("\n")),

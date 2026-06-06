@@ -40,6 +40,7 @@ use devo_core::history::summarizer::DefaultHistorySummarizer;
 use devo_core::message_to_response_items;
 use devo_core::query;
 use devo_core::tools::PermissionChecker;
+use devo_core::tools::ToolExecutionOptions;
 use devo_core::tools::ToolPermissionRequest;
 use devo_core::tools::ToolRuntime;
 use devo_core::tools::ToolRuntimeContext;
@@ -142,6 +143,7 @@ mod reference_search;
 mod skills;
 mod turn_exec;
 
+pub(crate) use connection::CONNECTION_NOTIFICATION_CHANNEL_CAPACITY;
 pub(crate) use connection::ConnectionRuntime;
 pub(crate) use connection::SubscriptionFilter;
 pub(crate) use items::render_input_items;

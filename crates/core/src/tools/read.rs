@@ -1,4 +1,5 @@
 use serde_json::json;
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -20,7 +21,7 @@ pub(crate) fn read_directory(
             if is_dir { format!("{name}/") } else { name }
         })
         .collect::<Vec<_>>();
-    items.sort_unstable_by_key(|a| a.to_lowercase());
+    items.sort_by_cached_key(|name| name.to_lowercase());
 
     let start = offset.saturating_sub(1);
     let sliced = items
@@ -120,7 +121,7 @@ pub(crate) fn read_file(
 
     let mut display_content = String::new();
     for (index, line) in raw.iter().enumerate() {
-        display_content.push_str(&format!("{}: {}\n", offset + index, line));
+        let _ = writeln!(display_content, "{}: {}", offset + index, line);
     }
 
     let last = offset + raw.len().saturating_sub(1);
@@ -227,6 +228,7 @@ pub(crate) fn missing_file_message(filepath: &str) -> String {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or(filepath);
+    let base_lower = base.to_lowercase();
 
     let suggestions = std::fs::read_dir(dir)
         .map(|entries| {
@@ -234,8 +236,8 @@ pub(crate) fn missing_file_message(filepath: &str) -> String {
                 .flatten()
                 .filter_map(|entry| entry.file_name().into_string().ok())
                 .filter(|name| {
-                    name.to_lowercase().contains(&base.to_lowercase())
-                        || base.to_lowercase().contains(&name.to_lowercase())
+                    let name_lower = name.to_lowercase();
+                    name_lower.contains(&base_lower) || base_lower.contains(&name_lower)
                 })
                 .take(3)
                 .collect::<Vec<_>>()

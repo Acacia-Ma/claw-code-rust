@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Result;
 use anyhow::anyhow;
@@ -18,6 +20,10 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::ClientTransportKind;
 use crate::ServerRuntime;
+use crate::runtime::CONNECTION_NOTIFICATION_CHANNEL_CAPACITY;
+
+const TRANSPORT_WRITE_CHANNEL_CAPACITY: usize = 4096;
+const TRANSPORT_BACKPRESSURE_LOG_THRESHOLD: Duration = Duration::from_millis(50);
 
 /// Transport trait per L3-BEH-SERVER-001.
 ///
@@ -44,11 +50,8 @@ pub trait Transport: Send + Sync {
 /// sequence numbering and subscription filtering.
 pub struct EventBroadcaster {
     /// Per-connection senders, keyed by connection_id.
-    connections: Arc<
-        tokio::sync::RwLock<
-            std::collections::HashMap<u64, mpsc::UnboundedSender<serde_json::Value>>,
-        >,
-    >,
+    connections:
+        Arc<tokio::sync::RwLock<std::collections::HashMap<u64, mpsc::Sender<serde_json::Value>>>>,
     /// Per-session monotonic sequence counters.
     sequence_counters: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u64>>>,
 }
@@ -62,11 +65,7 @@ impl EventBroadcaster {
     }
 
     /// Register a connection's event sender.
-    pub async fn register(
-        &self,
-        connection_id: u64,
-        sender: mpsc::UnboundedSender<serde_json::Value>,
-    ) {
+    pub async fn register(&self, connection_id: u64, sender: mpsc::Sender<serde_json::Value>) {
         self.connections.write().await.insert(connection_id, sender);
     }
 
@@ -84,9 +83,15 @@ impl EventBroadcaster {
         let current_seq = *seq;
         drop(counters);
 
-        let connections = self.connections.read().await;
-        for sender in connections.values() {
-            let _ = sender.send(event.clone());
+        let senders = self
+            .connections
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for sender in senders {
+            let _ = sender.send(event.clone()).await;
         }
         current_seq
     }
@@ -193,7 +198,7 @@ pub async fn run_listeners(runtime: Arc<ServerRuntime>, listen: &[String]) -> Re
 
 async fn run_stdio(runtime: Arc<ServerRuntime>) -> Result<()> {
     // Normal channel for event notifications (TextDelta, TurnStarted, …).
-    let (sender, mut receiver) = mpsc::unbounded_channel();
+    let (sender, mut receiver) = mpsc::channel(CONNECTION_NOTIFICATION_CHANNEL_CAPACITY);
     let sender_clone = sender.clone();
     let connection_id = runtime
         .register_connection(ClientTransportKind::Stdio, sender)
@@ -201,10 +206,9 @@ async fn run_stdio(runtime: Arc<ServerRuntime>) -> Result<()> {
     tracing::info!(connection_id, "stdio connection established");
 
     // Internal channel between the producer (reads from high_pri + normal)
-    // and the writer (writes to stdout). Unbounded so the producer never
-    // blocks — if stdout is slow, messages queue here instead of blocking
-    // the select loop that processes RPC responses.
-    let (write_tx, mut write_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // and the writer (writes to stdout). Bounded sends apply backpressure
+    // instead of allowing an unbounded stdout backlog.
+    let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(TRANSPORT_WRITE_CHANNEL_CAPACITY);
 
     // --- Writer task ---
     // Sole responsibility: read serialized lines from write_rx and write
@@ -221,7 +225,7 @@ async fn run_stdio(runtime: Arc<ServerRuntime>) -> Result<()> {
 
     // --- Producer task ---
     // Reads from high_pri and normal channels, serializes immediately,
-    // and pushes to write_tx. Never blocks on stdout.
+    // and pushes to write_tx. A slow writer backpressures this task.
     let producer_task = tokio::spawn(async move {
         loop {
             let line: Vec<u8>;
@@ -232,7 +236,7 @@ async fn run_stdio(runtime: Arc<ServerRuntime>) -> Result<()> {
                 }
                 else => break,
             }
-            if write_tx.send(line).is_err() {
+            if !send_transport_queue_message(&write_tx, line, connection_id, "stdio_write").await {
                 break;
             }
         }
@@ -246,8 +250,16 @@ async fn run_stdio(runtime: Arc<ServerRuntime>) -> Result<()> {
             continue;
         }
         let value: serde_json::Value = serde_json::from_str(&line)?;
-        if let Some(response) = runtime.handle_incoming(connection_id, value).await {
-            let _ = sender_clone.send(response);
+        if let Some(response) = runtime.handle_incoming(connection_id, value).await
+            && !send_transport_queue_message(
+                &sender_clone,
+                response,
+                connection_id,
+                "stdio_notifications",
+            )
+            .await
+        {
+            break;
         }
     }
 
@@ -280,7 +292,7 @@ async fn handle_websocket_connection(
 ) -> Result<()> {
     let websocket = accept_async(stream).await?;
     let (mut writer, mut reader) = websocket.split();
-    let (sender, mut receiver) = mpsc::unbounded_channel();
+    let (sender, mut receiver) = mpsc::channel(CONNECTION_NOTIFICATION_CHANNEL_CAPACITY);
     let sender_clone = sender.clone();
     let connection_id = runtime
         .register_connection(ClientTransportKind::WebSocket, sender)
@@ -305,8 +317,16 @@ async fn handle_websocket_connection(
         match frame {
             Message::Text(text) => {
                 let value: serde_json::Value = serde_json::from_str(&text)?;
-                if let Some(response) = runtime.handle_incoming(connection_id, value).await {
-                    let _ = sender_clone.send(response);
+                if let Some(response) = runtime.handle_incoming(connection_id, value).await
+                    && !send_transport_queue_message(
+                        &sender_clone,
+                        response,
+                        connection_id,
+                        "websocket_notifications",
+                    )
+                    .await
+                {
+                    break;
                 }
             }
             Message::Close(_) => break,
@@ -320,12 +340,64 @@ async fn handle_websocket_connection(
     Ok(())
 }
 
+async fn send_transport_queue_message<T>(
+    sender: &mpsc::Sender<T>,
+    value: T,
+    connection_id: u64,
+    queue: &'static str,
+) -> bool {
+    let reserve_started_at = Instant::now();
+    let permit =
+        match tokio::time::timeout(TRANSPORT_BACKPRESSURE_LOG_THRESHOLD, sender.reserve()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => {
+                tracing::debug!(connection_id, queue, "transport queue receiver dropped");
+                return false;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    connection_id,
+                    queue,
+                    threshold_ms = TRANSPORT_BACKPRESSURE_LOG_THRESHOLD.as_millis(),
+                    "transport queue applying backpressure"
+                );
+                match sender.reserve().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        tracing::debug!(
+                            connection_id,
+                            queue,
+                            "transport queue receiver dropped during backpressure"
+                        );
+                        return false;
+                    }
+                }
+            }
+        };
+    let waited = reserve_started_at.elapsed();
+    if waited >= TRANSPORT_BACKPRESSURE_LOG_THRESHOLD {
+        tracing::debug!(
+            connection_id,
+            queue,
+            waited_ms = waited.as_millis(),
+            "transport queue accepted message after backpressure"
+        );
+    }
+    permit.send(value);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::DEFAULT_WEBSOCKET_BIND_ADDRESS;
+    use super::EventBroadcaster;
     use super::ListenTarget;
     use super::parse_listen_target;
     use super::resolve_listen_targets;
+    use pretty_assertions::assert_eq;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::mpsc;
 
     #[test]
     fn parse_stdio_target() {
@@ -365,6 +437,41 @@ mod tests {
                     bind_address: DEFAULT_WEBSOCKET_BIND_ADDRESS.into(),
                 },
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn event_broadcaster_backpressures_full_sender() {
+        let broadcaster = Arc::new(EventBroadcaster::new());
+        let (tx, mut rx) = mpsc::channel(/*buffer*/ 1);
+        broadcaster.register(/*connection_id*/ 1, tx).await;
+
+        assert_eq!(
+            broadcaster
+                .broadcast("session", serde_json::json!({ "event": "first" }))
+                .await,
+            1
+        );
+        let broadcaster_for_task = Arc::clone(&broadcaster);
+        let mut blocked_broadcast = tokio::spawn(async move {
+            broadcaster_for_task
+                .broadcast("session", serde_json::json!({ "event": "second" }))
+                .await
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut blocked_broadcast)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            rx.recv().await.expect("first event"),
+            serde_json::json!({ "event": "first" })
+        );
+        assert_eq!(blocked_broadcast.await.expect("blocked broadcast"), 2);
+        assert_eq!(
+            rx.recv().await.expect("second event"),
+            serde_json::json!({ "event": "second" })
         );
     }
 }

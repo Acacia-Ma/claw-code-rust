@@ -328,13 +328,12 @@ pub fn insert_context_diff_message(messages: &mut Vec<Message>, diff: Message) {
 /// message with `tool_calls` be immediately followed by tool-result messages,
 /// not by another assistant message).
 fn merge_consecutive_same_role(messages: &mut Vec<RequestMessage>) {
-    let mut i = 1;
-    while i < messages.len() {
-        if messages[i].role == messages[i - 1].role {
-            let mut msg = messages.remove(i);
-            messages[i - 1].content.append(&mut msg.content);
-        } else {
-            i += 1;
+    let capacity = messages.len();
+    let previous = std::mem::replace(messages, Vec::with_capacity(capacity));
+    for mut message in previous {
+        match messages.last_mut() {
+            Some(last) if last.role == message.role => last.content.append(&mut message.content),
+            _ => messages.push(message),
         }
     }
 }

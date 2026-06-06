@@ -334,6 +334,17 @@ fn compact_tool_content(content: ToolContent) -> ToolContent {
     }
 }
 
+fn tool_content_model_bytes(content: &ToolContent) -> usize {
+    match content {
+        ToolContent::Text(text) => text.len(),
+        ToolContent::Json(json) => json.to_string().len(),
+        ToolContent::Mixed { text, json } => {
+            text.as_ref().map_or(0, String::len)
+                + json.as_ref().map_or(0, |json| json.to_string().len())
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main query loop
 // ---------------------------------------------------------------------------
@@ -516,6 +527,9 @@ pub async fn query(
                 &deferred_config,
             )
         };
+        let tool_prompt_metrics = prompt_surface.metrics.clone();
+        let deferred_tool_count = prompt_surface.deferred_tool_names.len();
+        let loaded_deferred_tool_count = prompt_surface.loaded_deferred_tool_names.len();
 
         // resolve thinking request parameter
         let ResolvedThinkingRequest {
@@ -529,13 +543,16 @@ pub async fn query(
             .resolve_thinking_selection(turn_config.thinking_selection.as_deref());
         let provider_request_model = turn_config.provider_request_model(&request_model);
 
+        let prompt_source_message_count = session.prompt_source_messages().len();
+        let history_items = session
+            .prompt_source_messages()
+            .iter()
+            .cloned()
+            .flat_map(message_to_response_items)
+            .collect::<Vec<_>>();
+        let prompt_source_item_count = history_items.len();
         let history = History {
-            items: session
-                .prompt_source_messages()
-                .iter()
-                .cloned()
-                .flat_map(message_to_response_items)
-                .collect(),
+            items: history_items,
             token_info: TokenInfo::default(),
             context: ContextView::new(
                 std::env::consts::OS,
@@ -575,8 +592,18 @@ pub async fn query(
         };
         session.prompt_token_estimate = estimate_request_prompt_tokens(&request);
         debug!(
-            messages = request.messages.len(),
-            tools = request.tools.as_ref().map_or(0, Vec::len),
+            prompt_source_messages = prompt_source_message_count,
+            prompt_source_items = prompt_source_item_count,
+            prefix_user_inputs = prefetched_user_inputs.len(),
+            request_messages = request.messages.len(),
+            exposed_tools = request.tools.as_ref().map_or(0, Vec::len),
+            deferred_tools = deferred_tool_count,
+            loaded_deferred_tools = loaded_deferred_tool_count,
+            baseline_tool_schema_tokens = tool_prompt_metrics.baseline_tool_schema_tokens,
+            exposed_tool_schema_tokens = tool_prompt_metrics.exposed_tool_schema_tokens,
+            deferred_reminder_tokens = tool_prompt_metrics.deferred_reminder_tokens,
+            estimated_tool_tokens_saved = tool_prompt_metrics.estimated_tokens_saved,
+            prompt_token_estimate = session.prompt_token_estimate,
             max_tokens = request.max_tokens,
             has_system = request.system.is_some(),
             "built model request"
@@ -938,6 +965,19 @@ pub async fn query(
         } else {
             runtime.execute_batch(&tool_calls).await
         };
+        let tool_result_count = results.len();
+        let tool_error_count = results.iter().filter(|result| result.is_error).count();
+        let tool_output_bytes = results
+            .iter()
+            .map(|result| tool_content_model_bytes(&result.content))
+            .sum::<usize>();
+        debug!(
+            tool_calls = tool_calls.len(),
+            tool_results = tool_result_count,
+            tool_errors = tool_error_count,
+            tool_output_bytes,
+            "tool batch completed"
+        );
 
         // Build tool result message (user role, per Anthropic API convention)
         // Apply micro-compact to large tool results

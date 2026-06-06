@@ -1,12 +1,15 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use devo_safety::ResourceKind;
 use devo_tools::contracts::ToolBudgets;
+use devo_tools::contracts::ToolProgress;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 use tracing::info;
 use tracing::warn;
 
@@ -21,7 +24,6 @@ type CompletionCallback = dyn Fn(&ToolCallResult) + Send + Sync;
 type CompletionCallbackArc = Arc<CompletionCallback>;
 type PermissionFuture = futures::future::BoxFuture<'static, Result<(), String>>;
 type PermissionCheckFn = dyn Fn(ToolPermissionRequest) -> PermissionFuture + Send + Sync;
-#[allow(dead_code)]
 const PROGRESS_DRAIN_GRACE_MS: u64 = 50;
 
 #[derive(Debug, Clone)]
@@ -64,6 +66,7 @@ pub struct ToolRuntime {
     permission: PermissionChecker,
     gate: RwLock<()>,
     context: ToolRuntimeContext,
+    execution_options: ToolExecutionOptions,
 }
 
 impl ToolRuntime {
@@ -73,6 +76,7 @@ impl ToolRuntime {
             permission,
             gate: RwLock::new(()),
             context: ToolRuntimeContext::default(),
+            execution_options: ToolExecutionOptions::default(),
         }
     }
 
@@ -86,6 +90,22 @@ impl ToolRuntime {
             permission,
             gate: RwLock::new(()),
             context,
+            execution_options: ToolExecutionOptions::default(),
+        }
+    }
+
+    pub fn new_with_context_and_options(
+        registry: Arc<ToolRegistry>,
+        permission: PermissionChecker,
+        context: ToolRuntimeContext,
+        execution_options: ToolExecutionOptions,
+    ) -> Self {
+        ToolRuntime {
+            registry,
+            permission,
+            gate: RwLock::new(()),
+            context,
+            execution_options,
         }
     }
 
@@ -95,6 +115,7 @@ impl ToolRuntime {
             permission: PermissionChecker::always_allow(),
             gate: RwLock::new(()),
             context: ToolRuntimeContext::default(),
+            execution_options: ToolExecutionOptions::default(),
         }
     }
 
@@ -186,7 +207,7 @@ impl ToolRuntime {
     pub(crate) async fn execute_single(
         &self,
         call: &ToolCall,
-        _on_progress: &Option<ProgressCallbackArc>,
+        on_progress: &Option<ProgressCallbackArc>,
     ) -> ToolCallResult {
         let tool_name = canonical_tool_name(&self.registry, &call.name);
         let tool = match self
@@ -215,21 +236,49 @@ impl ToolRuntime {
 
         info!(tool = %tool_name, id = %call.id, "executing tool");
 
-        // TODO: BUG here, the cancel_token should take as a parameter, pass from outside of execute_single
-        // TODO: The budgets should take as a parameter, pass from outside of execute_single
         let ctx = crate::contracts::ToolContext {
             tool_call_id: crate::invocation::ToolCallId(call.id.clone()),
             session_id: self.context.session_id.clone(),
             turn_id: self.context.turn_id.clone(),
             workspace_root: self.context.cwd.clone(),
-            budgets: ToolBudgets {
-                output_limit_bytes: 32 * 1024,
-                wall_time_limit_ms: Some(6_000),
-            },
-            cancel_token: CancellationToken::new(),
+            budgets: self.execution_options.budgets,
+            cancel_token: self.execution_options.cancel_token.clone(),
         };
 
-        let result = tool.handle(ctx, call.input.clone(), None).await;
+        let (progress_sender, progress_task) = match on_progress {
+            Some(callback) => {
+                let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ToolProgress>();
+                let callback = Arc::clone(callback);
+                let tool_use_id = call.id.clone();
+                let task = tokio::spawn(async move {
+                    while let Some(progress) = progress_rx.recv().await {
+                        let content = match progress {
+                            ToolProgress::OutputDelta { delta } => delta,
+                            ToolProgress::StatusUpdate { message, percent } => match percent {
+                                Some(percent) => format!("{message} ({percent}%)"),
+                                None => message,
+                            },
+                            ToolProgress::Completion { summary } => summary,
+                        };
+                        callback(&tool_use_id, &content);
+                    }
+                });
+                (Some(progress_tx), Some(task))
+            }
+            None => (None, None),
+        };
+
+        let result = tool.handle(ctx, call.input.clone(), progress_sender).await;
+        if let Some(progress_task) = progress_task
+            && tokio::time::timeout(
+                Duration::from_millis(PROGRESS_DRAIN_GRACE_MS),
+                progress_task,
+            )
+            .await
+            .is_err()
+        {
+            warn!(tool = %tool_name, id = %call.id, "timed out draining tool progress");
+        }
 
         match result {
             Ok(output) => {
@@ -341,6 +390,24 @@ pub struct ToolRuntimeContext {
     pub session_id: String,
     pub turn_id: Option<String>,
     pub cwd: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolExecutionOptions {
+    pub budgets: ToolBudgets,
+    pub cancel_token: CancellationToken,
+}
+
+impl Default for ToolExecutionOptions {
+    fn default() -> Self {
+        Self {
+            budgets: ToolBudgets {
+                output_limit_bytes: 32 * 1024,
+                wall_time_limit_ms: Some(6_000),
+            },
+            cancel_token: CancellationToken::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1169,8 +1236,15 @@ mod tests {
             &self,
             _ctx: ToolContext,
             _input: serde_json::Value,
-            _progress: Option<ToolProgressSender>,
+            progress: Option<ToolProgressSender>,
         ) -> Result<ToolResult, ToolCallError> {
+            if let Some(progress) = progress {
+                for chunk in &self.chunks {
+                    let _ = progress.send(crate::contracts::ToolProgress::OutputDelta {
+                        delta: chunk.clone(),
+                    });
+                }
+            }
             Ok(ToolResult::success(
                 ToolResultContent::Text(self.chunks.join("")),
                 "done",
@@ -1224,12 +1298,25 @@ mod tests {
             name: "stream_tool".into(),
             input: serde_json::json!({}),
         };
+        let progress_items = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let progress_items_for_callback = Arc::clone(&progress_items);
 
-        let results = runtime.execute_batch_streaming(&[call], |_, _| {}).await;
+        let results = runtime
+            .execute_batch_streaming(&[call], move |tool_use_id, content| {
+                progress_items_for_callback
+                    .lock()
+                    .expect("progress lock")
+                    .push(format!("{tool_use_id}:{content}"));
+            })
+            .await;
 
         assert_eq!(results.len(), 1);
         assert!(!results[0].is_error);
         assert_eq!(results[0].content.clone().into_string(), "hello world");
+        assert_eq!(
+            *progress_items.lock().expect("progress lock"),
+            vec!["s1:hello ".to_string(), "s1:world".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -1252,5 +1339,108 @@ mod tests {
         let results = runtime.execute_batch_streaming(&[call], |_, _| {}).await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_error);
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct CapturedContextOptions {
+        output_limit_bytes: usize,
+        wall_time_limit_ms: Option<u64>,
+        cancel_token_cancelled: bool,
+    }
+
+    struct ContextCaptureTool {
+        spec: ToolSpec,
+        seen: Arc<std::sync::Mutex<Option<CapturedContextOptions>>>,
+    }
+
+    impl ContextCaptureTool {
+        fn new(seen: Arc<std::sync::Mutex<Option<CapturedContextOptions>>>) -> Self {
+            Self {
+                spec: ToolSpec::new(
+                    "capture_context",
+                    "capture context",
+                    JsonSchema::object(Default::default(), None, None),
+                ),
+                seen,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToolHandler for ContextCaptureTool {
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
+        }
+
+        async fn handle(
+            &self,
+            ctx: ToolContext,
+            _input: serde_json::Value,
+            _progress: Option<ToolProgressSender>,
+        ) -> Result<ToolResult, ToolCallError> {
+            *self.seen.lock().expect("seen lock") = Some(CapturedContextOptions {
+                output_limit_bytes: ctx.budgets.output_limit_bytes,
+                wall_time_limit_ms: ctx.budgets.wall_time_limit_ms,
+                cancel_token_cancelled: ctx.cancel_token.is_cancelled(),
+            });
+            Ok(ToolResult::success(
+                ToolResultContent::Text("captured".into()),
+                "captured",
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_passes_custom_execution_options_to_tool_context() {
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let mut builder = ToolRegistryBuilder::new();
+        builder.register_handler(
+            "capture_context",
+            Arc::new(ContextCaptureTool::new(Arc::clone(&seen))),
+        );
+        builder.push_spec(ToolSpec {
+            name: "capture_context".into(),
+            description: String::new(),
+            input_schema: JsonSchema::object(Default::default(), None, None),
+            output_mode: ToolOutputMode::Text,
+            execution_mode: ToolExecutionMode::ReadOnly,
+            capability_tags: vec![],
+            supports_parallel: true,
+            preparation_feedback: ToolPreparationFeedback::None,
+            display_name: None,
+            supports_cancellation: None,
+            supports_streaming: None,
+        });
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+        let runtime = ToolRuntime::new_with_context_and_options(
+            Arc::new(builder.build()),
+            PermissionChecker::always_allow(),
+            ToolRuntimeContext::default(),
+            ToolExecutionOptions {
+                budgets: ToolBudgets {
+                    output_limit_bytes: 7,
+                    wall_time_limit_ms: Some(11),
+                },
+                cancel_token,
+            },
+        );
+        let call = ToolCall {
+            id: "ctx".into(),
+            name: "capture_context".into(),
+            input: serde_json::json!({}),
+        };
+
+        let result = runtime.execute_single(&call, &None).await;
+
+        assert!(!result.is_error);
+        assert_eq!(
+            *seen.lock().expect("seen lock"),
+            Some(CapturedContextOptions {
+                output_limit_bytes: 7,
+                wall_time_limit_ms: Some(11),
+                cancel_token_cancelled: true,
+            })
+        );
     }
 }

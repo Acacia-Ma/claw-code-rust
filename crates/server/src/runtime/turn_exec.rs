@@ -1,5 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc as std_mpsc;
+use std::time::Duration;
+use std::time::Instant;
 
 use super::*;
 use crate::{FileChangePayload, TurnPlanStepPayload, TurnPlanUpdatedPayload};
@@ -7,12 +12,91 @@ use devo_core::tools::tool_spec::ToolPreparationFeedback;
 use devo_util_git::extract_paths_from_patch;
 use tokio::sync::mpsc;
 
+const QUERY_EVENT_CHANNEL_CAPACITY: usize = 1024;
+const QUERY_EVENT_FORWARD_CHANNEL_CAPACITY: usize = 1;
+const QUERY_EVENT_BACKPRESSURE_LOG_THRESHOLD: Duration = Duration::from_millis(50);
+
 struct PendingToolCall {
     item_id: Option<ItemId>,
     item_seq: Option<u64>,
     input: serde_json::Value,
     is_command_execution: bool,
     command: String,
+}
+
+#[derive(Clone)]
+struct BoundedQueryEventSender {
+    tx: std_mpsc::SyncSender<QueryEvent>,
+    queue_depth: Arc<AtomicUsize>,
+    queue_max_depth: Arc<AtomicUsize>,
+}
+
+impl BoundedQueryEventSender {
+    fn send(&self, event: QueryEvent) {
+        let depth = self.queue_depth.fetch_add(1, Ordering::AcqRel) + 1;
+        self.queue_max_depth.fetch_max(depth, Ordering::AcqRel);
+        match self.tx.try_send(event) {
+            Ok(()) => {}
+            Err(std_mpsc::TrySendError::Full(event)) => {
+                let send_started_at = Instant::now();
+                if self.tx.send(event).is_err() {
+                    decrement_query_event_queue_depth(&self.queue_depth);
+                    return;
+                }
+                let waited = send_started_at.elapsed();
+                if waited >= QUERY_EVENT_BACKPRESSURE_LOG_THRESHOLD {
+                    tracing::warn!(
+                        waited_ms = waited.as_millis(),
+                        threshold_ms = QUERY_EVENT_BACKPRESSURE_LOG_THRESHOLD.as_millis(),
+                        "query event bridge applied backpressure"
+                    );
+                }
+            }
+            Err(std_mpsc::TrySendError::Disconnected(_)) => {
+                decrement_query_event_queue_depth(&self.queue_depth);
+            }
+        }
+    }
+}
+
+fn bounded_query_event_channel(
+    capacity: usize,
+    queue_depth: Arc<AtomicUsize>,
+    queue_max_depth: Arc<AtomicUsize>,
+) -> (
+    BoundedQueryEventSender,
+    mpsc::Receiver<QueryEvent>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (ingress_tx, ingress_rx) = std_mpsc::sync_channel::<QueryEvent>(capacity);
+    let (event_tx, event_rx) = mpsc::channel::<QueryEvent>(QUERY_EVENT_FORWARD_CHANNEL_CAPACITY);
+    let queue_depth_for_forwarder = Arc::clone(&queue_depth);
+    let forwarder = tokio::task::spawn_blocking(move || {
+        while let Ok(event) = ingress_rx.recv() {
+            if event_tx.blocking_send(event).is_err() {
+                decrement_query_event_queue_depth(&queue_depth_for_forwarder);
+                while ingress_rx.try_recv().is_ok() {
+                    decrement_query_event_queue_depth(&queue_depth_for_forwarder);
+                }
+                break;
+            }
+        }
+    });
+    (
+        BoundedQueryEventSender {
+            tx: ingress_tx,
+            queue_depth,
+            queue_max_depth,
+        },
+        event_rx,
+        forwarder,
+    )
+}
+
+fn decrement_query_event_queue_depth(queue_depth: &AtomicUsize) {
+    let _ = queue_depth.fetch_update(Ordering::AcqRel, Ordering::Acquire, |depth| {
+        Some(depth.saturating_sub(1))
+    });
 }
 
 async fn complete_reasoning_item(
@@ -235,11 +319,19 @@ impl ServerRuntime {
         let Some(session_arc) = self.sessions.lock().await.get(&session_id).cloned() else {
             return;
         };
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<QueryEvent>();
+        let event_queue_depth = Arc::new(AtomicUsize::new(0));
+        let event_queue_max_depth = Arc::new(AtomicUsize::new(0));
+        let (event_tx, mut event_rx, event_forwarder_task) = bounded_query_event_channel(
+            QUERY_EVENT_CHANNEL_CAPACITY,
+            Arc::clone(&event_queue_depth),
+            Arc::clone(&event_queue_max_depth),
+        );
         let runtime = Arc::clone(&self);
         let turn_for_events = turn.clone();
         let turn_for_plan_updates = turn.clone();
         let event_session_arc = Arc::clone(&session_arc);
+        let event_queue_depth_for_task = Arc::clone(&event_queue_depth);
+        let event_queue_max_depth_for_task = Arc::clone(&event_queue_max_depth);
         let event_task = tokio::spawn(async move {
             // This task owns the streamed model output. It turns raw query
             // callbacks into persisted turn items and keeps enough state to
@@ -255,6 +347,7 @@ impl ServerRuntime {
             let mut latest_usage: Option<TurnUsage> = None;
             let mut usage_base: Option<(usize, usize, usize)> = None;
             while let Some(event) = event_rx.recv().await {
+                decrement_query_event_queue_depth(&event_queue_depth_for_task);
                 match event {
                     QueryEvent::TextDelta(text) => {
                         let (item_id, item_seq) = match (assistant_item_id, assistant_item_seq) {
@@ -1081,6 +1174,15 @@ impl ServerRuntime {
                 )
                 .await;
             }
+            tracing::debug!(
+                session_id = %session_id,
+                turn_id = %turn_for_events.turn_id,
+                query_event_queue_max_depth =
+                    event_queue_max_depth_for_task.load(Ordering::Acquire),
+                query_event_queue_remaining =
+                    event_queue_depth_for_task.load(Ordering::Acquire),
+                "query event stream drained"
+            );
             latest_usage
         });
 
@@ -1103,12 +1205,12 @@ impl ServerRuntime {
             core_session.push_message(Message::user(input.clone()));
             let event_callback_tx = event_tx.clone();
             let callback = std::sync::Arc::new(move |event: QueryEvent| {
-                let _ = event_callback_tx.send(event);
+                event_callback_tx.send(event);
             });
             let registry = Arc::clone(&self.deps.registry);
             let permission_mode = core_session.config.permission_mode;
             let permission_profile = core_session.config.permission_profile.clone();
-            let runtime = ToolRuntime::new_with_context(
+            let runtime = ToolRuntime::new_with_context_and_options(
                 Arc::clone(&registry),
                 self.build_permission_checker(
                     session_id,
@@ -1121,6 +1223,7 @@ impl ServerRuntime {
                     turn_id: Some(turn_for_events.turn_id.to_string()),
                     cwd: core_session.cwd.clone(),
                 },
+                ToolExecutionOptions::default(),
             );
             let result = query(
                 &mut core_session,
@@ -1142,6 +1245,14 @@ impl ServerRuntime {
             )
         };
         drop(event_tx);
+        if let Err(error) = event_forwarder_task.await {
+            tracing::warn!(
+                session_id = %session_id,
+                turn_id = %turn.turn_id,
+                error = %error,
+                "query event forwarder failed"
+            );
+        }
         // Wait for the event task to finish draining buffered stream events
         // before we persist the terminal turn state.
         let latest_usage = event_task.await.ok().flatten();
@@ -1595,6 +1706,75 @@ mod tests {
     fn plan_tool_detection_matches_update_plan() {
         assert!(is_plan_tool("update_plan"));
         assert!(!is_plan_tool("read"));
+    }
+
+    #[tokio::test]
+    async fn bounded_query_event_bridge_preserves_order_and_depth() {
+        let queue_depth = Arc::new(AtomicUsize::new(0));
+        let queue_max_depth = Arc::new(AtomicUsize::new(0));
+        let (sender, mut rx, forwarder) = bounded_query_event_channel(
+            /*capacity*/ 2,
+            Arc::clone(&queue_depth),
+            Arc::clone(&queue_max_depth),
+        );
+
+        sender.send(QueryEvent::TextDelta("one".to_string()));
+        sender.send(QueryEvent::ReasoningDelta("two".to_string()));
+        drop(sender);
+
+        let first = rx.recv().await.expect("first event");
+        decrement_query_event_queue_depth(&queue_depth);
+        let second = rx.recv().await.expect("second event");
+        decrement_query_event_queue_depth(&queue_depth);
+        forwarder.await.expect("forwarder");
+
+        assert!(matches!(first, QueryEvent::TextDelta(text) if text == "one"));
+        assert!(matches!(second, QueryEvent::ReasoningDelta(text) if text == "two"));
+        assert_eq!(queue_depth.load(Ordering::Acquire), 0);
+        assert!(queue_max_depth.load(Ordering::Acquire) >= 1);
+        assert!(rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn bounded_query_event_bridge_keeps_terminal_event_after_backpressure() {
+        let queue_depth = Arc::new(AtomicUsize::new(0));
+        let queue_max_depth = Arc::new(AtomicUsize::new(0));
+        let (sender, mut rx, forwarder) = bounded_query_event_channel(
+            /*capacity*/ 1,
+            Arc::clone(&queue_depth),
+            Arc::clone(&queue_max_depth),
+        );
+        let sender_for_task = sender.clone();
+        let send_task = tokio::task::spawn_blocking(move || {
+            sender_for_task.send(QueryEvent::TextDelta("first".to_string()));
+            sender_for_task.send(QueryEvent::TextDelta("second".to_string()));
+            sender_for_task.send(QueryEvent::TurnComplete {
+                stop_reason: devo_core::StopReason::EndTurn,
+            });
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let first = rx.recv().await.expect("first event");
+        decrement_query_event_queue_depth(&queue_depth);
+        let second = rx.recv().await.expect("second event");
+        decrement_query_event_queue_depth(&queue_depth);
+        let terminal = rx.recv().await.expect("terminal event");
+        decrement_query_event_queue_depth(&queue_depth);
+
+        send_task.await.expect("send task");
+        drop(sender);
+        forwarder.await.expect("forwarder");
+
+        assert!(matches!(first, QueryEvent::TextDelta(text) if text == "first"));
+        assert!(matches!(second, QueryEvent::TextDelta(text) if text == "second"));
+        assert!(matches!(
+            terminal,
+            QueryEvent::TurnComplete {
+                stop_reason: devo_core::StopReason::EndTurn,
+            }
+        ));
+        assert_eq!(queue_depth.load(Ordering::Acquire), 0);
+        assert!(queue_max_depth.load(Ordering::Acquire) >= 2);
     }
 
     #[test]

@@ -1,10 +1,23 @@
 use super::*;
+use std::time::Duration;
+use std::time::Instant;
+
+pub(crate) const CONNECTION_NOTIFICATION_CHANNEL_CAPACITY: usize = 4096;
+
+const CONNECTION_NOTIFICATION_BACKPRESSURE_LOG_THRESHOLD: Duration = Duration::from_millis(50);
+
+struct PendingConnectionNotification {
+    connection_id: u64,
+    method: String,
+    sender: mpsc::Sender<serde_json::Value>,
+    value: serde_json::Value,
+}
 
 impl ServerRuntime {
     pub async fn register_connection(
         self: &Arc<Self>,
         transport: ClientTransportKind,
-        sender: mpsc::UnboundedSender<serde_json::Value>,
+        sender: mpsc::Sender<serde_json::Value>,
     ) -> u64 {
         let connection_id = self.next_connection_id.fetch_add(1, Ordering::SeqCst);
         let mut connections = self.connections.lock().await;
@@ -238,34 +251,56 @@ impl ServerRuntime {
         event: ServerEvent,
     ) {
         let session_id = event.session_id();
-        let mut connections = self.connections.lock().await;
-        if let Some(connection) = connections.get_mut(&connection_id) {
+        let notification = {
+            let mut connections = self.connections.lock().await;
+            let Some(connection) = connections.get_mut(&connection_id) else {
+                return;
+            };
             if !connection.should_deliver(method, session_id) {
                 return;
             }
-            let value = serde_json::to_value(NotificationEnvelope {
+            Some(PendingConnectionNotification {
+                connection_id,
                 method: method.to_string(),
-                params: event.with_seq(connection.next_seq()),
+                sender: connection.sender.clone(),
+                value: serde_json::to_value(NotificationEnvelope {
+                    method: method.to_string(),
+                    params: event.with_seq(connection.next_seq()),
+                })
+                .expect("serialize notification"),
             })
-            .expect("serialize notification");
-            let _ = connection.sender.send(value);
+        };
+        if let Some(notification) = notification {
+            send_connection_notification(notification).await;
         }
     }
 
     pub(super) async fn broadcast_event(&self, event: ServerEvent) {
         let method = event.method_name();
         let session_id = event.session_id();
-        let mut connections = self.connections.lock().await;
-        for connection in connections.values_mut() {
-            if !connection.should_deliver(method, session_id) {
-                continue;
-            }
-            let value = serde_json::to_value(NotificationEnvelope {
-                method: method.to_string(),
-                params: event.clone().with_seq(connection.next_seq()),
-            })
-            .expect("serialize notification");
-            let _ = connection.sender.send(value);
+        let notifications = {
+            let mut connections = self.connections.lock().await;
+            connections
+                .iter_mut()
+                .filter_map(|(connection_id, connection)| {
+                    if !connection.should_deliver(method, session_id) {
+                        return None;
+                    }
+                    Some(PendingConnectionNotification {
+                        connection_id: *connection_id,
+                        method: method.to_string(),
+                        sender: connection.sender.clone(),
+                        value: serde_json::to_value(NotificationEnvelope {
+                            method: method.to_string(),
+                            params: event.clone().with_seq(connection.next_seq()),
+                        })
+                        .expect("serialize notification"),
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        for notification in notifications {
+            send_connection_notification(notification).await;
         }
     }
 
@@ -297,7 +332,7 @@ impl ServerRuntime {
 pub(crate) struct ConnectionRuntime {
     pub(crate) transport: ClientTransportKind,
     pub(crate) state: ConnectionState,
-    pub(crate) sender: mpsc::UnboundedSender<serde_json::Value>,
+    pub(crate) sender: mpsc::Sender<serde_json::Value>,
     pub(crate) opt_out_notification_methods: HashSet<String>,
     pub(crate) subscriptions: Vec<SubscriptionFilter>,
     next_event_seq: u64,
@@ -334,4 +369,59 @@ impl ConnectionRuntime {
 pub(crate) struct SubscriptionFilter {
     pub(crate) session_id: Option<SessionId>,
     pub(crate) event_types: HashSet<String>,
+}
+
+async fn send_connection_notification(notification: PendingConnectionNotification) {
+    let PendingConnectionNotification {
+        connection_id,
+        method,
+        sender,
+        value,
+    } = notification;
+    let reserve_started_at = Instant::now();
+    let permit = match tokio::time::timeout(
+        CONNECTION_NOTIFICATION_BACKPRESSURE_LOG_THRESHOLD,
+        sender.reserve(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) => {
+            tracing::debug!(
+                connection_id,
+                method = %method,
+                "client notification receiver dropped"
+            );
+            return;
+        }
+        Err(_) => {
+            tracing::warn!(
+                connection_id,
+                method = %method,
+                threshold_ms = CONNECTION_NOTIFICATION_BACKPRESSURE_LOG_THRESHOLD.as_millis(),
+                "client notification queue applying backpressure"
+            );
+            match sender.reserve().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    tracing::debug!(
+                        connection_id,
+                        method = %method,
+                        "client notification receiver dropped during backpressure"
+                    );
+                    return;
+                }
+            }
+        }
+    };
+    let waited = reserve_started_at.elapsed();
+    if waited >= CONNECTION_NOTIFICATION_BACKPRESSURE_LOG_THRESHOLD {
+        tracing::debug!(
+            connection_id,
+            method = %method,
+            waited_ms = waited.as_millis(),
+            "client notification queue accepted message after backpressure"
+        );
+    }
+    permit.send(value);
 }

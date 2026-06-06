@@ -126,32 +126,26 @@ pub fn filter_reason(items: &[ResponseItem]) -> Vec<ResponseItem> {
 /// is removed from the sequence. This operates on a **mutable** slice
 /// since it is typically called before prompt building.
 pub fn pair_tool_call_items(items: &mut Vec<ResponseItem>) {
-    let mut i = 0;
-    while i < items.len() {
-        let remove = match &items[i] {
-            ResponseItem::ToolCall { id, .. } => {
-                // Check if there is a matching ToolCallOutput anywhere
-                !items.iter().any(|item| match item {
-                    ResponseItem::ToolCallOutput { tool_use_id, .. } => tool_use_id == id,
-                    _ => false,
-                })
-            }
-            ResponseItem::ToolCallOutput { tool_use_id, .. } => {
-                // Check if there is a matching ToolCall anywhere
-                !items.iter().any(|item| match item {
-                    ResponseItem::ToolCall { id, .. } => id == tool_use_id,
-                    _ => false,
-                })
-            }
-            _ => false,
-        };
+    let tool_call_ids = items
+        .iter()
+        .filter_map(|item| match item {
+            ResponseItem::ToolCall { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let tool_output_ids = items
+        .iter()
+        .filter_map(|item| match item {
+            ResponseItem::ToolCallOutput { tool_use_id, .. } => Some(tool_use_id.clone()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
 
-        if remove {
-            items.remove(i);
-        } else {
-            i += 1;
-        }
-    }
+    items.retain(|item| match item {
+        ResponseItem::ToolCall { id, .. } => tool_output_ids.contains(id),
+        ResponseItem::ToolCallOutput { tool_use_id, .. } => tool_call_ids.contains(tool_use_id),
+        _ => true,
+    });
 }
 
 #[cfg(test)]

@@ -315,38 +315,42 @@ fn preserve_suffix_from_latest_user_message(items: &[ResponseItem]) -> Vec<Respo
 /// turn (text + tool calls) into multiple consecutive assistant messages,
 /// which provider APIs reject.
 fn merge_consecutive_same_role(messages: &mut Vec<RequestMessage>) {
-    let mut i = 1;
-    while i < messages.len() {
-        if messages[i].role == messages[i - 1].role {
-            let mut msg = messages.remove(i);
-            messages[i - 1].content.append(&mut msg.content);
-        } else {
-            i += 1;
+    let capacity = messages.len();
+    let previous = std::mem::replace(messages, Vec::with_capacity(capacity));
+    for mut message in previous {
+        match messages.last_mut() {
+            Some(last) if last.role == message.role => last.content.append(&mut message.content),
+            _ => messages.push(message),
         }
     }
 }
 
 /// Estimates the byte-length-based token count for a single item.
 fn estimate_item_tokens(item: &ResponseItem) -> usize {
-    let text = match item {
-        ResponseItem::Reason { text } => text.clone(),
-        ResponseItem::Message(msg) => msg
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                devo_protocol::ContentBlock::Text { text } => Some(text.clone()),
-                devo_protocol::ContentBlock::Reasoning { text } => Some(text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-        ResponseItem::ToolCall { name, input, .. } => {
-            format!("{}: {}", name, input)
+    let bytes = match item {
+        ResponseItem::Reason { text } => text.len(),
+        ResponseItem::Message(msg) => {
+            let mut bytes = 0;
+            let mut text_blocks = 0;
+            for block in &msg.content {
+                let text = match block {
+                    devo_protocol::ContentBlock::Text { text }
+                    | devo_protocol::ContentBlock::Reasoning { text } => text,
+                    _ => continue,
+                };
+                if text_blocks > 0 {
+                    bytes += 1;
+                }
+                bytes += text.len();
+                text_blocks += 1;
+            }
+            bytes
         }
-        ResponseItem::ToolCallOutput { content, .. } => content.clone(),
+        ResponseItem::ToolCall { name, input, .. } => name.len() + 2 + input.to_string().len(),
+        ResponseItem::ToolCallOutput { content, .. } => content.len(),
     };
     // Rough estimate: ~4 bytes per token.
-    text.len().div_ceil(4)
+    bytes.div_ceil(4)
 }
 
 #[cfg(test)]

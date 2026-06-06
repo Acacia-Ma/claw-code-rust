@@ -185,8 +185,8 @@ fn build_runtime_with_registry(
 
 async fn initialize_connection(
     runtime: &Arc<ServerRuntime>,
-) -> Result<(u64, mpsc::UnboundedReceiver<serde_json::Value>)> {
-    let (notifications_tx, notifications_rx) = mpsc::unbounded_channel();
+) -> Result<(u64, mpsc::Receiver<serde_json::Value>)> {
+    let (notifications_tx, notifications_rx) = mpsc::channel(/*buffer*/ 4096);
     let connection_id = runtime
         .register_connection(ClientTransportKind::Stdio, notifications_tx)
         .await;
@@ -250,7 +250,7 @@ async fn start_session(
 }
 
 async fn wait_for_turn_completed(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
 ) -> Result<()> {
     timeout(Duration::from_secs(5), async {
         while let Some(value) = notifications_rx.recv().await {
@@ -266,7 +266,7 @@ async fn wait_for_turn_completed(
 }
 
 async fn wait_for_approval_request(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
 ) -> Result<()> {
     timeout(Duration::from_secs(5), async {
         while let Some(value) = notifications_rx.recv().await {

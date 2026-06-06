@@ -31,11 +31,13 @@ impl ApplyPatchHandler {
                 description: "Apply a unified diff patch to the filesystem.".into(),
                 input_schema: JsonSchema::object(
                     std::collections::BTreeMap::from([(
-                        "patch".to_string(),
-                        JsonSchema::string(Some("The unified diff patch to apply")),
+                        "patchText".to_string(),
+                        JsonSchema::string(Some(
+                            "The full patch text that describes all changes to be made",
+                        )),
                     )]),
-                    Some(vec!["patch".to_string()]),
-                    None,
+                    Some(vec!["patchText".to_string()]),
+                    Some(false),
                 ),
                 output_mode: ToolOutputMode::Text,
                 execution_mode: ToolExecutionMode::Mutating,
@@ -79,5 +81,31 @@ impl ToolHandler for ApplyPatchHandler {
                 "Patch applied",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn apply_patch_schema_matches_executor_input() {
+        let handler = ApplyPatchHandler::new();
+        let expected = JsonSchema::object(
+            BTreeMap::from([(
+                "patchText".to_string(),
+                JsonSchema::string(Some(
+                    "The full patch text that describes all changes to be made",
+                )),
+            )]),
+            Some(vec!["patchText".to_string()]),
+            Some(false),
+        );
+
+        assert_eq!(handler.spec().input_schema, expected);
     }
 }

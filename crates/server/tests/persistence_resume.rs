@@ -1169,8 +1169,8 @@ fn build_runtime_with_provider(
 
 async fn initialize_connection(
     runtime: &Arc<ServerRuntime>,
-) -> Result<(u64, mpsc::UnboundedReceiver<serde_json::Value>)> {
-    let (notifications_tx, notifications_rx) = mpsc::unbounded_channel();
+) -> Result<(u64, mpsc::Receiver<serde_json::Value>)> {
+    let (notifications_tx, notifications_rx) = mpsc::channel(/*buffer*/ 4096);
     let connection_id = runtime
         .register_connection(ClientTransportKind::Stdio, notifications_tx)
         .await;
@@ -1207,7 +1207,7 @@ async fn initialize_connection(
 }
 
 async fn wait_for_turn_completed(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
 ) -> Result<()> {
     timeout(Duration::from_secs(5), async {
         while let Some(value) = notifications_rx.recv().await {
@@ -1223,7 +1223,7 @@ async fn wait_for_turn_completed(
 }
 
 async fn wait_for_title_update(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
     expected_title: &str,
 ) -> Result<()> {
     timeout(Duration::from_secs(5), async {
@@ -1243,7 +1243,7 @@ async fn wait_for_title_update(
 }
 
 async fn wait_for_any_title_update(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
 ) -> Result<String> {
     timeout(Duration::from_secs(5), async {
         while let Some(value) = notifications_rx.recv().await {
@@ -1261,7 +1261,7 @@ async fn wait_for_any_title_update(
 }
 
 async fn wait_for_notification_method(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
     method: &str,
 ) -> Result<()> {
     wait_for_notification_value(notifications_rx, method)
@@ -1270,7 +1270,7 @@ async fn wait_for_notification_method(
 }
 
 async fn wait_for_notification_value(
-    notifications_rx: &mut mpsc::UnboundedReceiver<serde_json::Value>,
+    notifications_rx: &mut mpsc::Receiver<serde_json::Value>,
     method: &str,
 ) -> Result<serde_json::Value> {
     let wanted = serde_json::json!(method);

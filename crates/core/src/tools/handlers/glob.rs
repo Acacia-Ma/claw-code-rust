@@ -113,8 +113,16 @@ impl ToolHandler for GlobHandler {
         }
 
         let text = String::from_utf8_lossy(&output.stdout);
-        let lines: Vec<&str> = text.lines().collect();
-        if lines.is_empty() {
+        let mut count = 0usize;
+        let mut matches = String::new();
+        for line in text.lines() {
+            if count > 0 {
+                matches.push('\n');
+            }
+            matches.push_str(line);
+            count += 1;
+        }
+        if count == 0 {
             return Ok(ToolResult::success(
                 ToolResultContent::Text("(no matches)".into()),
                 "No matches",
@@ -122,8 +130,8 @@ impl ToolHandler for GlobHandler {
         }
 
         Ok(ToolResult::success(
-            ToolResultContent::Text(lines.join("\n")),
-            format!("{} matches", lines.len()),
+            ToolResultContent::Text(matches),
+            format!("{count} matches"),
         ))
     }
 }
