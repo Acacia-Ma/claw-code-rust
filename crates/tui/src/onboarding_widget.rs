@@ -129,6 +129,7 @@ enum OnboardingState {
     /// Step 2: Select an existing provider or add one.
     ProviderSelection {
         model: String,
+        display_name: String,
         items: Vec<ProviderSelectionItem>,
         selected_idx: usize,
     },
@@ -771,6 +772,7 @@ impl OnboardingWidget {
                             });
                         self.state = OnboardingState::ProviderSelection {
                             model: slug,
+                            display_name: item.display_name.clone(),
                             items: Self::provider_selection_items(&self.provider_vendors),
                             selected_idx: 0,
                         };
@@ -874,7 +876,8 @@ impl OnboardingWidget {
                         display_name: model.clone(),
                     });
                 self.state = OnboardingState::ProviderSelection {
-                    model,
+                    model: model.clone(),
+                    display_name: model,
                     items: Self::provider_selection_items(&self.provider_vendors),
                     selected_idx: 0,
                 };
@@ -913,6 +916,7 @@ impl OnboardingWidget {
     fn provider_selection_handle_key(&mut self, key: KeyEvent) {
         let OnboardingState::ProviderSelection {
             model,
+            display_name,
             items,
             selected_idx,
         } = &mut self.state
@@ -934,6 +938,7 @@ impl OnboardingWidget {
             KeyCode::Enter => {
                 if let Some(item) = items.get(*selected_idx) {
                     let model_slug = model.clone();
+                    let selected_display_name = display_name.clone();
                     match &item.kind {
                         ProviderSelectionKind::Vendor(provider_vendor) => {
                             let provider = provider_vendor
@@ -973,7 +978,7 @@ impl OnboardingWidget {
                                 base_url,
                                 api_key: String::new(),
                                 model_name: model_slug.clone(),
-                                display_name: String::new(),
+                                display_name: selected_display_name,
                                 active_field,
                                 input,
                                 cursor_pos,
@@ -995,7 +1000,7 @@ impl OnboardingWidget {
                                 base_url: String::new(),
                                 api_key: String::new(),
                                 model_name: model_slug.clone(),
-                                display_name: String::new(),
+                                display_name: selected_display_name,
                                 active_field: InlineField::ProviderName,
                                 input: String::new(),
                                 cursor_pos: 0,
@@ -1089,8 +1094,11 @@ impl OnboardingWidget {
                     InlineField::ModelName => {
                         *model_name = input.trim().to_string();
                         *active_field = InlineField::DisplayName;
-                        // Prefill display name from model slug.
-                        let suggestion = model_name.clone();
+                        let suggestion = if display_name.trim().is_empty() {
+                            model_name.clone()
+                        } else {
+                            display_name.clone()
+                        };
                         *input = suggestion.clone();
                         *cursor_pos = Self::char_count(&suggestion);
                     }
@@ -1129,8 +1137,10 @@ impl OnboardingWidget {
                     InlineField::ProviderName => {
                         // Go back to provider selection.
                         let model = model.clone();
+                        let display_name = display_name.clone();
                         self.state = OnboardingState::ProviderSelection {
                             model,
+                            display_name,
                             items: Self::provider_selection_items(&self.provider_vendors),
                             selected_idx: 0,
                         };
@@ -2431,6 +2441,7 @@ impl Renderable for OnboardingWidget {
             }
             OnboardingState::ProviderSelection {
                 model: _,
+                display_name: _,
                 items,
                 selected_idx,
             } => {

@@ -163,6 +163,35 @@ fn edited_existing_provider_widget() -> (OnboardingWidget, mpsc::UnboundedReceiv
     (widget, app_event_rx)
 }
 
+fn edited_display_name_widget() -> (OnboardingWidget, mpsc::UnboundedReceiver<AppEvent>) {
+    let models = vec![deepseek_model()];
+    let (app_event_tx, mut app_event_rx) = mpsc::unbounded_channel();
+    let mut widget = OnboardingWidget::new(
+        &models,
+        AppEventSender::new(app_event_tx),
+        FrameRequester::test_dummy(),
+        true,
+    );
+    assert_eq!(
+        next_shell_command(&mut app_event_rx),
+        "provider list".to_string()
+    );
+
+    widget.on_provider_vendors_listed(vec![deepseek_provider_vendor()]);
+    widget.handle_key_event(press(KeyCode::Enter));
+    widget.handle_key_event(press(KeyCode::Enter));
+    widget.handle_key_event(press(KeyCode::Enter));
+    for _ in 0.."Deepseek V4 Flash".chars().count() {
+        widget.handle_key_event(press(KeyCode::Backspace));
+    }
+    type_text(&mut widget, "DeepSeek V4 Flash Custom");
+    widget.handle_key_event(press(KeyCode::Enter));
+    widget.handle_key_event(press(KeyCode::Enter));
+    widget.handle_key_event(press(KeyCode::Enter));
+
+    (widget, app_event_rx)
+}
+
 #[test]
 fn onboarding_inline_input_backspace_handles_non_ascii_characters() {
     let models = vec![deepseek_model()];
@@ -212,7 +241,7 @@ fn onboarding_existing_provider_validation_payload_preserves_edited_model_name()
 
     assert_eq!(payload["model_slug"], "deepseek-v4-flash");
     assert_eq!(payload["model_name"], "DeepSeek-V4-Flash");
-    assert_eq!(payload["display_name"], "DeepSeek-V4-Flash");
+    assert_eq!(payload["display_name"], "Deepseek V4 Flash");
 }
 
 #[test]
@@ -228,8 +257,20 @@ fn onboarding_existing_provider_bypass_payload_preserves_edited_model_name() {
 
     assert_eq!(payload["model_slug"], "deepseek-v4-flash");
     assert_eq!(payload["model_name"], "DeepSeek-V4-Flash");
-    assert_eq!(payload["display_name"], "DeepSeek-V4-Flash");
+    assert_eq!(payload["display_name"], "Deepseek V4 Flash");
     assert_eq!(widget.take_result(), None);
+}
+
+#[test]
+fn onboarding_existing_provider_validation_payload_preserves_edited_display_name() {
+    let (_widget, mut app_event_rx) = edited_display_name_widget();
+
+    let command = next_shell_command(&mut app_event_rx);
+    let payload = command_payload(&command, "onboard ");
+
+    assert_eq!(payload["model_slug"], "deepseek-v4-flash");
+    assert_eq!(payload["model_name"], "deepseek-v4-flash");
+    assert_eq!(payload["display_name"], "DeepSeek V4 Flash Custom");
 }
 
 #[test]
