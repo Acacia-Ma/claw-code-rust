@@ -83,7 +83,7 @@ without clearing every omitted provider field from user config.
 - `skills.bundled.enabled = true`
 - `skills.include_instructions = true`
 - `skills.config = []`
-- `experimental.code_search = false`
+- `experimental.code_search = true`
 - `updates.enabled = true`
 - `updates.check_on_startup = true`
 - `updates.check_interval_hours = 24`
@@ -135,7 +135,7 @@ name = "code-review"
 enabled = true
 
 [experimental]
-code-search = false
+code-search = true
 
 [updates]
 enabled = true

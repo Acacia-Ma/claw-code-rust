@@ -116,7 +116,7 @@ check_interval_hours = 48
                 include_instructions: Some(true),
                 config: Vec::new(),
             },
-            experimental: ExperimentalConfig { code_search: false },
+            experimental: ExperimentalConfig { code_search: true },
             mcp_oauth_credentials_store: Some(OAuthCredentialsStoreMode::default()),
             mcp: super::McpConfig::default(),
             provider: ProviderConfigSection::default(),
@@ -134,10 +134,10 @@ check_interval_hours = 48
 }
 
 #[test]
-fn default_app_config_disables_experimental_code_search() {
+fn default_app_config_enables_code_search() {
     assert_eq!(
         AppConfig::default().experimental,
-        ExperimentalConfig { code_search: false }
+        ExperimentalConfig { code_search: true }
     );
 }
 

@@ -460,7 +460,7 @@ Rules:
 
 ## Experimental
 
-`[experimental]` controls opt-in experimental runtime features.
+`[experimental]` controls runtime feature gates.
 
 Fields:
 
@@ -468,7 +468,7 @@ Fields:
 
 Rules:
 
-- Missing `code-search` defaults to false.
+- Missing `code-search` defaults to true.
 - `code_search` may be accepted as a compatibility alias, but writers should emit `code-search`.
 
 ## Tools

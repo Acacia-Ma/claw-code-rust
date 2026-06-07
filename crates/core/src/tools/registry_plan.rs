@@ -57,7 +57,7 @@ impl ToolPlanConfig {
         // No incompatible combinations currently exist.
         // - use_shell_command and use_unified_exec are independent (shell_command replaces bash,
         //   unified exec adds new tools)
-        // - code_search is an experimental read-only search tool and does not conflict with either
+        // - code_search is a read-only search tool and does not conflict with either
         // - all can be true simultaneously with no conflict
     }
 }
@@ -67,7 +67,7 @@ impl Default for ToolPlanConfig {
         ToolPlanConfig {
             use_shell_command: true,
             use_unified_exec: true,
-            code_search: false,
+            code_search: true,
         }
     }
 }
@@ -856,18 +856,18 @@ mod tests {
         let config = ToolPlanConfig::default();
         assert!(config.use_unified_exec);
         assert!(config.use_shell_command);
-        assert!(!config.code_search);
+        assert!(config.code_search);
     }
 
     #[test]
-    fn config_from_app_config_copies_experimental_code_search() {
+    fn config_from_app_config_copies_disabled_code_search() {
         let app_config = AppConfig {
-            experimental: devo_config::ExperimentalConfig { code_search: true },
+            experimental: devo_config::ExperimentalConfig { code_search: false },
             ..AppConfig::default()
         };
         let config = ToolPlanConfig::from_app_config(&app_config);
 
-        assert!(config.code_search);
+        assert!(!config.code_search);
     }
 
     #[test]
@@ -949,8 +949,11 @@ mod tests {
     /// Trace: L2-DES-TOOL-001
     /// Verifies: semantic code retrieval is registered as a read-only parallel workspace search tool.
     #[test]
-    fn plan_builder_omits_code_search_by_default() {
-        let plan = build_tool_registry_plan(&ToolPlanConfig::default());
+    fn plan_builder_omits_code_search_when_disabled() {
+        let plan = build_tool_registry_plan(&ToolPlanConfig {
+            code_search: false,
+            ..ToolPlanConfig::default()
+        });
         let spec_names: Vec<&str> = plan.specs.iter().map(|spec| spec.name.as_str()).collect();
         let handler_names: Vec<&str> = plan
             .handlers
@@ -965,11 +968,8 @@ mod tests {
     /// Trace: L2-DES-TOOL-001
     /// Verifies: semantic code retrieval is registered as a read-only parallel workspace search tool.
     #[test]
-    fn plan_builder_registers_code_search() {
-        let plan = build_tool_registry_plan(&ToolPlanConfig {
-            code_search: true,
-            ..ToolPlanConfig::default()
-        });
+    fn plan_builder_registers_code_search_by_default() {
+        let plan = build_tool_registry_plan(&ToolPlanConfig::default());
         let spec = plan
             .specs
             .iter()
