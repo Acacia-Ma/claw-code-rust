@@ -299,13 +299,6 @@ impl ServerRuntime {
                 .sum::<usize>();
             let conversation_tokens = approx_tokens_from_byte_count(prompt_bytes);
 
-            let global = self
-                .deps
-                .config_store
-                .lock()
-                .expect("app config store mutex should not be poisoned")
-                .effective_config()
-                .compaction_token_limit;
             let model = inline
                 .summary
                 .model
@@ -335,11 +328,7 @@ impl ServerRuntime {
             let window = inline
                 .summary
                 .effective_context_window
-                .or_else(|| {
-                    model.map(|model| {
-                        super::context_occupancy::resolved_compaction_limit(global, model)
-                    })
-                })
+                .or_else(|| model.map(super::context_occupancy::resolved_compaction_limit))
                 .unwrap_or(0);
             let previous_occupancy = inline.summary.last_context_occupancy.clone();
             let occupancy = super::context_occupancy::occupancy_after_compaction(
